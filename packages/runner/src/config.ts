@@ -69,6 +69,12 @@ function textOf(value: unknown): string | undefined {
   return text || undefined;
 }
 
+// A positive integer from the environment, or the fallback. Read at module load by the
+// callers that need a limit before any config file is parsed.
+export function intEnv(name: string, fallback: number): number {
+  return intFrom(process.env[name], fallback);
+}
+
 function intFrom(value: unknown, fallback: number): number {
   const parsed = typeof value === 'string' ? Number.parseInt(value, 10) : value;
   return typeof parsed === 'number' && Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;

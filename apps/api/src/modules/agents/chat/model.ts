@@ -1,5 +1,7 @@
 import { t } from 'elysia';
 
+import { intEnv } from '#shared/lib';
+
 import { contextUsageBody } from '../model';
 
 export { projectAgentParams } from '../model';
@@ -13,11 +15,21 @@ export { projectAgentParams } from '../model';
 
 // The longest text delta accepted in one event. A runner buffers its output rather
 // than sending a request per token, and this bounds how much one event may carry.
-const DELTA_LIMIT = 12_000;
+//
+// 🔴 A runner truncates to the same two numbers before it posts, so raising one here
+// without raising it in the runner only wastes headroom, and raising it in the runner
+// alone puts every oversized event past this maxLength — the whole batch then fails
+// the union with a 400 that names no field, and the answer is lost. Set both.
+// The runner reads ITSAPLAN_DELTA_LIMIT and ITSAPLAN_TOOL_TEXT_LIMIT.
+//
+// Read once at module load: the schemas below are built from them, and the process
+// does not outlive its environment.
+const DELTA_LIMIT = intEnv('AGENT_CHAT_DELTA_LIMIT', 12_000);
 
 // The longest arguments or result accepted for one tool call. A runner reports each of
-// them whole, and cutting one breaks the JSON the chat indents and highlights.
-const TOOL_TEXT_LIMIT = 32_000;
+// them whole, and cutting one breaks the JSON the chat indents and highlights, so this
+// is the larger of the two.
+const TOOL_TEXT_LIMIT = intEnv('AGENT_CHAT_TOOL_TEXT_LIMIT', 32_000);
 
 const RunStartedEvent = t.Object({
   type: t.Literal('RUN_STARTED'),
