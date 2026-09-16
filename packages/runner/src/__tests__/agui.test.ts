@@ -226,6 +226,38 @@ describe('answer stream', () => {
     expect((result as { content: string }).content).toBe('README.md');
   });
 
+  // The server validates each event against a maxLength equal to this limit, so a
+  // result cut to fit must come out at the limit and not one character over it: the
+  // ellipsis the cut adds is part of what is sent. An outsized result used to arrive
+  // at 32_001 characters, match none of the event schemas, and fail the whole batch
+  // with a 400 that named no field.
+  it('cuts an outsized tool result to the limit, ellipsis included', async () => {
+    const sink = collect();
+    const stream = new AnswerStream('opencode-json', 'chat:1:u:x', '7', sink.send);
+
+    const huge = 'x'.repeat(40_000);
+    stream.write(
+      [
+        JSON.stringify({
+          sessionID: 'ses_1',
+          part: {
+            type: 'tool',
+            callID: 'c1',
+            tool: 'bash',
+            state: { status: 'completed', input: { command: 'cat big' }, output: huge },
+          },
+        }),
+        '',
+      ].join('\n'),
+    );
+    await stream.finish('');
+
+    const result = sink.events.find((e) => e.type === 'TOOL_CALL_RESULT');
+    const content = (result as { content: string }).content;
+    expect(content.length).toBe(32_000);
+    expect(content.startsWith('…')).toBe(true);
+  });
+
   it('reports what a failed opencode tool call said, once', async () => {
     const sink = collect();
     const stream = new AnswerStream('opencode-json', 'chat:1:u:x', '7', sink.send);

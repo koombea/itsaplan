@@ -519,7 +519,11 @@ export class UsageReader {
 }
 
 function tail(text: string, limit: number): string {
-  return text.length <= limit ? text : `…${text.slice(-limit)}`;
+  // The ellipsis counts against the limit. The server validates these fields at a
+  // maxLength equal to it, so handing back limit + 1 characters fails the whole
+  // batch. Sliced from the length rather than by a negative index, which at a
+  // limit of 1 would be slice(-0) and return everything.
+  return text.length <= limit ? text : `…${text.slice(text.length - limit + 1)}`;
 }
 
 // A tool result is either a string or the block list the model was shown.

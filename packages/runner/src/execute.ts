@@ -32,7 +32,11 @@ const ERROR_LIMIT = 400;
 // Applied as the output arrives, so a command that prints for half an hour does not buffer
 // all of it to have everything but the last few kilobytes thrown away.
 function tail(text: string, limit: number): string {
-  return text.length <= limit ? text : `…${text.slice(-limit)}`;
+  // The ellipsis counts against the limit. The server validates these fields at a
+  // maxLength equal to it, so handing back limit + 1 characters fails the whole
+  // batch. Sliced from the length rather than by a negative index, which at a
+  // limit of 1 would be slice(-0) and return everything.
+  return text.length <= limit ? text : `…${text.slice(text.length - limit + 1)}`;
 }
 
 function childEnv(config: RunnerConfig, task: Task): Record<string, string> {
