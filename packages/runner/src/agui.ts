@@ -1,4 +1,4 @@
-import type { OutputFormat } from './config';
+import { intEnv, type OutputFormat } from './config';
 
 // Turns what the command prints into AG-UI events (https://docs.ag-ui.com), which is what
 // the server stores and the chat reads. A CLI that reports its own stream also carries the
@@ -29,11 +29,16 @@ export interface ContextUsage {
 // per token, and the reader cannot tell the difference at this size anyway.
 const FLUSH_CHARS = 1500;
 // The server's own cap on one text event. Longer output is split across events.
-const DELTA_LIMIT = 12_000;
+//
+// 🔴 These two must match what the server accepts, or an oversized event fails its
+// union and takes the whole batch down with a 400 that names no field. Raise them
+// here only together with AGENT_CHAT_DELTA_LIMIT and AGENT_CHAT_TOOL_TEXT_LIMIT on
+// the server. Read once at module load, like the rest of the runner's environment.
+const DELTA_LIMIT = intEnv('ITSAPLAN_DELTA_LIMIT', 12_000);
 // A tool's arguments and result are reported whole: cutting one breaks the JSON the chat
 // indents and highlights. An outsized one is cut from the front, where a long output says
 // least.
-const TOOL_TEXT_LIMIT = 32_000;
+const TOOL_TEXT_LIMIT = intEnv('ITSAPLAN_TOOL_TEXT_LIMIT', 32_000);
 
 // Produces the events of one answer and hands them to `send` in batches. The caller
 // writes the command's output as it arrives and calls flush on a timer, so a long
@@ -519,7 +524,11 @@ export class UsageReader {
 }
 
 function tail(text: string, limit: number): string {
-  return text.length <= limit ? text : `…${text.slice(-limit)}`;
+  // The ellipsis counts against the limit. The server validates these fields at a
+  // maxLength equal to it, so handing back limit + 1 characters fails the whole
+  // batch. Sliced from the length rather than by a negative index, which at a
+  // limit of 1 would be slice(-0) and return everything.
+  return text.length <= limit ? text : `…${text.slice(text.length - limit + 1)}`;
 }
 
 // A tool result is either a string or the block list the model was shown.

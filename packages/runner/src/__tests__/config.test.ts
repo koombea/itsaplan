@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, afterAll } from 'bun:test';
+import { describe, it, expect, beforeEach, afterEach, afterAll } from 'bun:test';
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadConfig } from '../config';
+import { loadConfig, intEnv } from '../config';
 
 // The config is what decides which agents a runner serves and what each one runs, and a
 // wrong merge is silent: the runner starts, it just works for the wrong agent or with the
@@ -124,5 +124,28 @@ describe('several agents', () => {
     await expect(
       load({ ...base, apiKey: 'key-shared', agents: [{ name: 'no key' }] }),
     ).rejects.toThrow('each with its own apiKey');
+  });
+});
+
+// The two event caps are read from the environment at module load so an instance can
+// raise them, and a bad value must not silently become zero — that would cut every
+// tool result to nothing.
+describe('intEnv', () => {
+  const NAME = 'ITSAPLAN_TEST_LIMIT_XYZ';
+  afterEach(() => {
+    delete process.env[NAME];
+  });
+
+  it('reads a positive integer', () => {
+    process.env[NAME] = '128000';
+    expect(intEnv(NAME, 32_000)).toBe(128_000);
+  });
+
+  it('falls back when unset, empty, zero, negative or not a number', () => {
+    expect(intEnv(NAME, 32_000)).toBe(32_000);
+    for (const bad of ['', '0', '-5', 'lots']) {
+      process.env[NAME] = bad;
+      expect(intEnv(NAME, 32_000)).toBe(32_000);
+    }
   });
 });
