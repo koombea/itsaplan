@@ -4,6 +4,10 @@ import { APP_NAME, APP_SITE_URL } from '@/utils/app';
 import { serverRuntimeEnv } from '@/utils/runtimeEnv';
 import { DEFAULT_LOCALE } from '@/i18n/locales';
 
+// Long enough for an api under load on a cold instance, short enough that a stalled
+// one costs a page a visible pause rather than a hung render.
+const BRANDING_FETCH_TIMEOUT_MS = 3000;
+
 // What the instance shows when it has never been branded, which is also what a
 // field left empty falls back to.
 export const DEFAULT_BRANDING: BrandingSettings = {
@@ -28,7 +32,13 @@ export const serverBranding = cache(async (): Promise<BrandingSettings> => {
   // reached by service name, which is what SERVICE_URL_API carries.
   const origin = process.env.SERVICE_URL_API || serverRuntimeEnv().apiUrl;
   try {
-    const response = await fetch(`${origin}/auth-config`, { cache: 'no-store' });
+    // An api that accepts the connection and then never answers would otherwise hold
+    // this render open for as long as the socket stays up, and every page waits on
+    // this read. The deadline is what turns that into the fallback below.
+    const response = await fetch(`${origin}/auth-config`, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(BRANDING_FETCH_TIMEOUT_MS),
+    });
     if (!response.ok) return DEFAULT_BRANDING;
     const config = (await response.json()) as { branding?: Partial<BrandingSettings> };
     return { ...DEFAULT_BRANDING, ...(config.branding ?? {}) };
