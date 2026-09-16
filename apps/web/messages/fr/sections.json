@@ -39,6 +39,10 @@
       "label": "Stockage",
       "description": "Ce que les utilisateurs peuvent envoyer : la taille maximale d'un fichier, les types de pièces jointes acceptés, et l'espace de stockage alloué à chaque projet."
     },
+    "branding": {
+      "label": "Identité visuelle",
+      "description": "L'identité que cette instance présente : nom, logo, couleur d'accentuation et langue par défaut. Un champ laissé vide conserve la valeur d'origine."
+    },
     "telegram": {
       "label": "Telegram",
       "description": "Le bot auquel les utilisateurs relient leur compte Telegram, et celui qui envoie les notifications Telegram des projets sans bot dédié."

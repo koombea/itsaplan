@@ -18,6 +18,7 @@ import { mountMcp } from './mcp/mount';
 import { setMcpApp } from './mcp/app-ref';
 import { gitWebhookRoutes } from './modules/git/webhook';
 import { scimRoutes } from './modules/scim';
+import { getBranding } from './modules/settings/service';
 import { syncOidcGroupsAfterCallback } from './modules/scim/oidc-sync';
 import { normalizeOpenApiResponse } from './openapi';
 import pkg from '../../../package.json';
@@ -265,9 +266,13 @@ export const app = new Elysia()
     },
   )
   // What the sign-in and sign-up screens need before there is a session: whether
-  // registration is open, invite-only, or closed, and which sign-in methods are
-  // offered. Public on purpose — the screens are reached logged out. It carries no
-  // credentials, only the instance's own policy.
+  // registration is open, invite-only, or closed, which sign-in methods are offered,
+  // and the instance branding. Public on purpose — the screens are reached logged
+  // out. It carries no credentials, only the instance's own policy and appearance.
+  //
+  // The branding rides along here rather than on a route of its own because every
+  // page needs it, logged out included: this route is mounted on the root chain, so
+  // it never passes through authContext and the login screen already fetches it.
   .get(
     '/auth-config',
     async () => {
@@ -290,6 +295,7 @@ export const app = new Elysia()
         // given. Empty falls back to a translated default.
         oidcLabel: await getOidcLabel(),
         hasUsers: (await db.$count(user)) > 0,
+        branding: await getBranding(),
       };
     },
     {

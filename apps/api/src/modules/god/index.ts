@@ -81,6 +81,8 @@ import { getInstanceBotSettings, setInstanceBotSettings } from '#modules/telegra
 import { SCIM_BASE_URL } from '#modules/scim/resource';
 import {
   setStorageSettings,
+  getBranding,
+  setBranding,
   getHotkeySettings,
   setHotkeySettings,
   getProjectDefaults,
@@ -88,6 +90,8 @@ import {
 } from '#modules/settings/service';
 import { getUpdateStatus } from '#modules/settings/updates';
 import {
+  BrandingSettingsBody,
+  BrandingSettingsSchema,
   HotkeyCombosSchema,
   ProjectDefaultsSchema,
   StorageSettingsSchema,
@@ -413,6 +417,25 @@ export const godRoutes = new Elysia({ name: 'god', detail: { tags: ['God'] } })
       summary: 'Update project defaults',
       description:
         'Update what a newly created project starts with. Projects that already exist are untouched; each setting stays editable per project.',
+    },
+  })
+
+  .get('/god/branding-settings', () => getBranding(), {
+    response: { 200: BrandingSettingsSchema, ...errors(401, 403) },
+    detail: {
+      summary: 'Get the instance branding',
+      description:
+        'Get the product identity this instance presents: name, site, logo, accent color, sign-in tagline, default language and tab icon.',
+    },
+  })
+
+  .put('/god/branding-settings', ({ body }) => setBranding(body), {
+    body: BrandingSettingsBody,
+    response: { 200: BrandingSettingsSchema, ...errors(400, 401, 403) },
+    detail: {
+      summary: 'Update the instance branding',
+      description:
+        'Update the product identity this instance presents. A field left empty falls back to the built-in value.',
     },
   })
 

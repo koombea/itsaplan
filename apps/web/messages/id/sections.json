@@ -39,6 +39,10 @@
       "label": "Penyimpanan",
       "description": "Batas unggahan pengguna: ukuran file tunggal, jenis lampiran yang diterima, dan ruang penyimpanan untuk setiap proyek."
     },
+    "branding": {
+      "label": "Merek",
+      "description": "Identitas produk yang ditampilkan instance ini: nama, logo, warna aksen, dan bahasa bawaan. Kolom yang dikosongkan tetap memakai nilai bawaan."
+    },
     "telegram": {
       "label": "Telegram",
       "description": "Bot yang dihubungkan pengguna ke akun Telegram mereka, dan bot yang mengirimkan notifikasi Telegram untuk proyek yang tidak menetapkan bot sendiri."

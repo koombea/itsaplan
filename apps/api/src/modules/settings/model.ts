@@ -1,4 +1,5 @@
 import { t } from 'elysia';
+import { LOCALES } from '#modules/user-preferences/locale';
 
 export const StorageSettingsSchema = t.Object({
   maxAttachmentMb: t.Number(),
@@ -10,6 +11,30 @@ export const StorageSettingsSchema = t.Object({
 export const ProjectDefaultsSchema = t.Object({
   mcpEnabled: t.Boolean(),
 });
+
+// The instance branding. The two URL fields and the accent color are pasted by the
+// operator and end up in an `src` attribute and in a CSS declaration, so the shape
+// is pinned here rather than trusted: https only, and a color literal that cannot
+// close the declaration it is written into. The web app checks the same shapes
+// again before it interpolates them, because a value can also arrive from a row
+// written by hand.
+const HTTPS_URL_PATTERN = '^$|^https://[^\\s"\'<>]+$';
+
+// `#rrggbb`, or an oklch() whose arguments are numbers, percentages and an alpha.
+const COLOR_LITERAL_PATTERN =
+  '^$|^#[0-9a-fA-F]{6}$|^oklch\\( *[0-9.]+%? +[0-9.]+%? +[0-9.]+(?: *\\/ *[0-9.]+%?)? *\\)$';
+
+export const BrandingSettingsSchema = t.Object({
+  appName: t.String({ maxLength: 60 }),
+  siteUrl: t.String({ pattern: HTTPS_URL_PATTERN, maxLength: 2048 }),
+  logoUrl: t.String({ pattern: HTTPS_URL_PATTERN, maxLength: 2048 }),
+  accentColor: t.String({ pattern: COLOR_LITERAL_PATTERN, maxLength: 64 }),
+  loginTagline: t.String({ maxLength: 200 }),
+  defaultLocale: t.UnionEnum([...LOCALES]),
+  faviconUrl: t.String({ pattern: HTTPS_URL_PATTERN, maxLength: 2048 }),
+});
+
+export const BrandingSettingsBody = t.Partial(BrandingSettingsSchema);
 
 // A command id bound to a combination written as modifier tokens plus a key
 // ('mod+k', 'n'). The set of commands lives in the web app (its lib/hotkeys), so

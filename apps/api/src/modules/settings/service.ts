@@ -5,9 +5,7 @@ import {
   getStorageSettings,
   type StorageSettings,
 } from '@repo/db';
-
-// The instance settings kept in app_setting: the upload limits and the keyboard
-// shortcuts.
+import type { Locale } from '#modules/user-preferences/locale';
 
 // Instance-wide upload limits (app_setting key 'storage'). getStorageSettings/
 // mimeAllowed/MB/StorageSettings live in @repo/db (packages/db/src/domains/storage.ts) —
@@ -57,6 +55,56 @@ export async function setProjectDefaults(
 ): Promise<ProjectDefaults> {
   const next = { ...(await getProjectDefaults()), ...patch };
   await setSetting(PROJECT_DEFAULTS_SETTING_KEY, next);
+  return next;
+}
+
+// The instance branding (app_setting key 'branding'): the product identity this
+// instance presents instead of the built-in one. Every field defaults to what the
+// web app ships with, so an instance that never opens the screen keeps today's
+// appearance and no row is written.
+
+export const BRANDING_SETTING_KEY = 'branding';
+
+export interface BrandingSettings {
+  appName: string;
+  siteUrl: string;
+  // Absolute https URL of the mark, pasted rather than uploaded. Empty falls back
+  // to the built-in SVG.
+  logoUrl: string;
+  // A strict CSS color literal that replaces --primary. Empty keeps the achromatic
+  // one from the stylesheet.
+  accentColor: string;
+  // The line under the product name on the sign-in panel. Empty falls back to the
+  // translated one.
+  loginTagline: string;
+  // The language a visitor gets when neither their cookie nor their browser names
+  // one the instance ships.
+  defaultLocale: Locale;
+  // Absolute https URL of the browser tab icon. Empty falls back to app/icon.svg.
+  faviconUrl: string;
+}
+
+function defaultBranding(): BrandingSettings {
+  return {
+    appName: "It's a Plan",
+    siteUrl: 'https://itsaplan.dev/',
+    logoUrl: '',
+    accentColor: '',
+    loginTagline: '',
+    defaultLocale: 'en',
+    faviconUrl: '',
+  };
+}
+
+export async function getBranding(): Promise<BrandingSettings> {
+  const stored = await getSetting<Partial<BrandingSettings>>(BRANDING_SETTING_KEY);
+  // Merge over the default so a value written before a field was added stays valid.
+  return { ...defaultBranding(), ...(stored ?? {}) };
+}
+
+export async function setBranding(patch: Partial<BrandingSettings>): Promise<BrandingSettings> {
+  const next = { ...(await getBranding()), ...patch };
+  await setSetting(BRANDING_SETTING_KEY, next);
   return next;
 }
 
