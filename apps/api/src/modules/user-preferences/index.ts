@@ -4,6 +4,7 @@ import { authContext } from '#shared/auth-context';
 import { HttpError } from '#shared/lib';
 import { errors } from '#shared/responses';
 import { getMembership } from '#modules/members/service';
+import { getBranding } from '#modules/settings/service';
 import { PreferencePatch, PreferenceResponse } from './model';
 import { getPreferences, isValidTimezone, updatePreferences } from './service';
 import { localeFromAcceptLanguage } from './locale';
@@ -23,10 +24,17 @@ export const userPreferenceRoutes = new Elysia({
 
   .get(
     '/account/preferences',
-    ({ user, request }) =>
+    async ({ user, request }) =>
       getPreferences(
         requireUser(user).id,
-        localeFromAcceptLanguage(request.headers.get('accept-language')),
+        // An account that never saved a language is answered with what the browser
+        // asked for, and the instance's own default when it asked for nothing this
+        // app ships. The web app writes this answer into the locale cookie, so a
+        // hardcoded 'en' here would undo the branded default on first load.
+        localeFromAcceptLanguage(
+          request.headers.get('accept-language'),
+          (await getBranding()).defaultLocale,
+        ),
       ),
     {
       response: { 200: PreferenceResponse, ...errors(401) },
@@ -53,7 +61,10 @@ export const userPreferenceRoutes = new Elysia({
       return updatePreferences(
         current.id,
         body,
-        localeFromAcceptLanguage(request.headers.get('accept-language')),
+        localeFromAcceptLanguage(
+          request.headers.get('accept-language'),
+          (await getBranding()).defaultLocale,
+        ),
       );
     },
     {
