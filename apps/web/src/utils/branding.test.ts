@@ -28,8 +28,25 @@ describe('safeHttpsUrl', () => {
 describe('safeAccentColor', () => {
   it('accepts a six-digit hex and an oklch literal', () => {
     assert.equal(safeAccentColor('#1d4ed8'), '#1d4ed8');
+    assert.equal(safeAccentColor('#1D4ED8'), '#1D4ED8');
     assert.equal(safeAccentColor('oklch(0.62 0.19 260)'), 'oklch(0.62 0.19 260)');
-    assert.equal(safeAccentColor('oklch(62% 0.19 260 / 0.8)'), 'oklch(62% 0.19 260 / 0.8)');
+    assert.equal(safeAccentColor('oklch(62% 0.19 260)'), 'oklch(62% 0.19 260)');
+  });
+
+  it('refuses a translucent accent, which has no foreground that holds', () => {
+    for (const value of [
+      'oklch(0.1 0 0 / 0)',
+      'oklch(0.62 0.19 260 / 0.8)',
+      'oklch(62% 0.19 260 / 50%)',
+      'oklch(0.62 0.19 260 / 1)',
+    ]) {
+      assert.equal(safeAccentColor(value), null, value);
+    }
+  });
+
+  it('refuses a function name the api would reject', () => {
+    assert.equal(safeAccentColor('OKLCH(0.62 0.19 260)'), null);
+    assert.equal(safeAccentColor('Oklch(0.62 0.19 260)'), null);
   });
 
   it('refuses anything that could close the declaration and start another', () => {

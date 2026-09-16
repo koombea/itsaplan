@@ -21,8 +21,8 @@ export const DEFAULT_BRANDING: BrandingSettings = {
 };
 
 // The branding for a server render, read once per request. The api validated these
-// values when they were stored, but a row can also be written by hand, so the two
-// fields that reach an attribute or a stylesheet are re-checked at the point of use
+// values when they were stored, but a row can also be written by hand, so every field
+// that reaches an href, an src or a stylesheet is re-checked at the point of use
 // (safeHttpsUrl, safeAccentColor) rather than trusted here.
 //
 // A failure answers with the built-in identity: this read is on the path of every
@@ -59,9 +59,13 @@ export function safeHttpsUrl(value: string): string | null {
 
 // `#rrggbb`, or an oklch() of plain numbers. Anything else is refused before it is
 // written into a declaration: a value carrying `;` or `}` closes the rule and the
-// rest of the string becomes stylesheet the operator did not intend.
-const COLOR_LITERAL =
-  /^(#[0-9a-f]{6}|oklch\( *[0-9.]+%? +[0-9.]+%? +[0-9.]+( *\/ *[0-9.]+%?)? *\))$/i;
+// rest of the string becomes stylesheet the operator did not intend. No alpha, because
+// accentForeground reads the lightness alone: a translucent accent shows the page
+// through it, and the text chosen for the literal can land on the page's own
+// background instead. Character for character the grammar the api stores against
+// (settings/model.ts), so the form names a bad value under its own field rather than
+// enabling Save and collecting a 400.
+const COLOR_LITERAL = /^(#[0-9a-fA-F]{6}|oklch\( *[0-9.]+%? +[0-9.]+%? +[0-9.]+ *\))$/;
 
 export function safeAccentColor(value: string): string | null {
   return COLOR_LITERAL.test(value) ? value : null;

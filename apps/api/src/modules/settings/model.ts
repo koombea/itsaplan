@@ -20,13 +20,21 @@ export const ProjectDefaultsSchema = t.Object({
 // written by hand.
 const HTTPS_URL_PATTERN = '^$|^https://[^\\s"\'<>]+$';
 
-// `#rrggbb`, or an oklch() whose arguments are numbers, percentages and an alpha.
-const COLOR_LITERAL_PATTERN =
-  '^$|^#[0-9a-fA-F]{6}$|^oklch\\( *[0-9.]+%? +[0-9.]+%? +[0-9.]+(?: *\\/ *[0-9.]+%?)? *\\)$';
+// The name and the site have no "unset" state: every screen prints the name, and the
+// public share header links the site from a page with no session behind it. An empty
+// one is not a fall back to the built-in, it is a blank identity and a dead link, so
+// this schema refuses it rather than letting a god-mode client store it.
+const REQUIRED_HTTPS_URL_PATTERN = '^https://[^\\s"\'<>]+$';
+
+// `#rrggbb`, or an oklch() of plain numbers. No alpha: the accent replaces --primary
+// and the web app picks the text that sits on it from the lightness alone, which only
+// holds while the color is opaque. A translucent accent shows the page through it,
+// so the same lightness can end up carrying white text on a white background.
+const COLOR_LITERAL_PATTERN = '^$|^#[0-9a-fA-F]{6}$|^oklch\\( *[0-9.]+%? +[0-9.]+%? +[0-9.]+ *\\)$';
 
 export const BrandingSettingsSchema = t.Object({
-  appName: t.String({ maxLength: 60 }),
-  siteUrl: t.String({ pattern: HTTPS_URL_PATTERN, maxLength: 2048 }),
+  appName: t.String({ minLength: 1, maxLength: 60 }),
+  siteUrl: t.String({ pattern: REQUIRED_HTTPS_URL_PATTERN, maxLength: 2048 }),
   logoUrl: t.String({ pattern: HTTPS_URL_PATTERN, maxLength: 2048 }),
   accentColor: t.String({ pattern: COLOR_LITERAL_PATTERN, maxLength: 64 }),
   loginTagline: t.String({ maxLength: 200 }),
