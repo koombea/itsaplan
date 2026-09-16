@@ -230,6 +230,8 @@
     "faviconUrlHint": "The icon browsers show on the tab. Empty uses the built-in one.",
     "accentColor": "Accent color",
     "accentColorHint": "A hex color (#1d4ed8) or an oklch() literal. Empty keeps the grey the app ships with; the text on top of it is picked for legibility.",
+    "releaseHistory": "Release history",
+    "releaseHistoryHint": "Whether the sidebar footer opens the release notes. Only the instance owner ever sees that click, so turning it off hides nothing from your team. The footer keeps the mark, the name and the running version either way.",
     "urlInvalid": "Enter an address starting with https://.",
     "accentInvalid": "Enter a color as #rrggbb or oklch(L C H).",
     "language": "Language",

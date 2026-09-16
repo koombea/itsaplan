@@ -40,6 +40,7 @@ export const BrandingSettingsSchema = t.Object({
   loginTagline: t.String({ maxLength: 200 }),
   defaultLocale: t.UnionEnum([...LOCALES]),
   faviconUrl: t.String({ pattern: HTTPS_URL_PATTERN, maxLength: 2048 }),
+  releaseHistoryEnabled: t.Boolean(),
 });
 
 export const BrandingSettingsBody = t.Partial(BrandingSettingsSchema);

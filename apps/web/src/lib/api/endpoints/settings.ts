@@ -83,6 +83,8 @@ export interface BrandingSettings {
   defaultLocale: Locale;
   // Absolute https URL of the browser tab icon. Empty falls back to app/icon.svg.
   faviconUrl: string;
+  // Whether the sidebar footer opens the release history.
+  releaseHistoryEnabled: boolean;
 }
 
 export type BrandingSettingsPatch = Partial<BrandingSettings>;

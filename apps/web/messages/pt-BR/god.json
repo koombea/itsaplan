@@ -230,6 +230,8 @@
     "faviconUrlHint": "O ícone que os navegadores mostram na aba. Vazio usa o original.",
     "accentColor": "Cor de destaque",
     "accentColorHint": "Uma cor hexadecimal (#1d4ed8) ou um literal oklch(). Vazio mantém o cinza original; o texto sobre ela é escolhido para continuar legível.",
+    "releaseHistory": "Histórico de versões",
+    "releaseHistoryHint": "Define se o rodapé da barra lateral abre as notas da versão. Apenas o proprietário da instância vê esse clique, portanto desativá-lo não oculta nada da sua equipe. O rodapé mantém a marca, o nome e a versão em execução nos dois casos.",
     "urlInvalid": "Informe um endereço começando com https://.",
     "accentInvalid": "Informe uma cor como #rrggbb ou oklch(L C H).",
     "language": "Idioma",

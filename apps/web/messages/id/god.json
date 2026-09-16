@@ -230,6 +230,8 @@
     "faviconUrlHint": "Ikon yang ditampilkan peramban pada tab. Kosong memakai ikon bawaan.",
     "accentColor": "Warna aksen",
     "accentColorHint": "Warna heksadesimal (#1d4ed8) atau literal oklch(). Kosong mempertahankan abu-abu bawaan; teks di atasnya dipilih agar tetap terbaca.",
+    "releaseHistory": "Riwayat rilis",
+    "releaseHistoryHint": "Apakah bagian bawah bilah sisi membuka catatan rilis. Hanya pemilik instance yang melihat klik itu, jadi mematikannya tidak menyembunyikan apa pun dari tim Anda. Bagian bawah tetap menampilkan logo, nama, dan versi yang berjalan.",
     "urlInvalid": "Masukkan alamat yang diawali https://.",
     "accentInvalid": "Masukkan warna dalam bentuk #rrggbb atau oklch(L C H).",
     "language": "Bahasa",

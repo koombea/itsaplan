@@ -18,6 +18,7 @@ export const DEFAULT_BRANDING: BrandingSettings = {
   loginTagline: '',
   defaultLocale: DEFAULT_LOCALE,
   faviconUrl: '',
+  releaseHistoryEnabled: true,
 };
 
 // The branding for a server render, read once per request. The api validated these

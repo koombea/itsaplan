@@ -82,6 +82,9 @@ export interface BrandingSettings {
   defaultLocale: Locale;
   // Absolute https URL of the browser tab icon. Empty falls back to app/icon.svg.
   faviconUrl: string;
+  // Whether the sidebar footer opens the release history. Off leaves the footer
+  // showing the mark, the name and the running version, without the click.
+  releaseHistoryEnabled: boolean;
 }
 
 function defaultBranding(): BrandingSettings {
@@ -93,6 +96,7 @@ function defaultBranding(): BrandingSettings {
     loginTagline: '',
     defaultLocale: 'en',
     faviconUrl: '',
+    releaseHistoryEnabled: true,
   };
 }
 

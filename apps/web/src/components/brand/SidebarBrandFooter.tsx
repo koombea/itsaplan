@@ -15,7 +15,7 @@ import { useAppVersionQuery, useUpdateStatusQuery } from '@/services/updates.ser
 // release notes from here — they are the one who upgrades the instance, so the
 // check is theirs alone (GET /god/updates). Everyone else sees the version only.
 export default function SidebarBrandFooter() {
-  const { appName } = useBranding();
+  const { appName, releaseHistoryEnabled } = useBranding();
   const { data: session } = useSession();
   // The session store can already be filled by the time React hydrates, while the
   // server rendered without it. Reading it only after mount keeps the server and
@@ -62,8 +62,10 @@ export default function SidebarBrandFooter() {
   );
 
   // Without the owner's release data there is nothing to open, so the footer stays
-  // the plain mark it is for everyone else.
-  if (!status) return <div className={layout}>{content}</div>;
+  // the plain mark it is for everyone else. The flag belongs in the same test: the
+  // owner is the only one who ever holds a status, so checking it after would leave
+  // them the one click the setting is there to remove.
+  if (!status || !releaseHistoryEnabled) return <div className={layout}>{content}</div>;
 
   return (
     <>
