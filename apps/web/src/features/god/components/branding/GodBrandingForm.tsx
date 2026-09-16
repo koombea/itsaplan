@@ -7,8 +7,10 @@ import { useTranslations } from 'next-intl';
 import type { BrandingSettings } from '@/lib/api/endpoints/settings';
 import SettingsCard from '@/components/common/page/SettingsCard';
 import SettingsSection from '@/components/common/page/SettingsSection';
+import SettingsRow from '@/components/common/page/SettingsRow';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import {
   Select,
   SelectContent,
@@ -137,6 +139,22 @@ export default function GodBrandingForm({ settings }: { settings: BrandingSettin
                 onChange={(accentColor) => set({ accentColor })}
               />
             </div>
+          </SettingsCard>
+          <SettingsCard>
+            <SettingsRow
+              title={t('releaseHistory')}
+              description={t('releaseHistoryHint')}
+              control={
+                // SettingsRow prints the title as a sibling of the control, so the switch
+                // itself carries no text: a screen reader would announce it unnamed, and
+                // the one thing the listener needs is which setting it toggles.
+                <Switch
+                  aria-label={t('releaseHistory')}
+                  checked={form.releaseHistoryEnabled}
+                  onCheckedChange={(releaseHistoryEnabled) => set({ releaseHistoryEnabled })}
+                />
+              }
+            />
           </SettingsCard>
         </SettingsSection>
 

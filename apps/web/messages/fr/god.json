@@ -230,6 +230,8 @@
     "faviconUrlHint": "L'icône que les navigateurs affichent sur l'onglet. Vide, celle d'origine est utilisée.",
     "accentColor": "Couleur d'accentuation",
     "accentColorHint": "Une couleur hexadécimale (#1d4ed8) ou un littéral oklch(). Vide, le gris d'origine est conservé ; le texte posé dessus est choisi pour rester lisible.",
+    "releaseHistory": "Historique des versions",
+    "releaseHistoryHint": "Indique si le pied de la barre latérale ouvre les notes de version. Seul le propriétaire de l'instance voit ce clic ; le désactiver ne masque donc rien à votre équipe. Le pied conserve la marque, le nom et la version en cours dans les deux cas.",
     "urlInvalid": "Saisissez une adresse commençant par https://.",
     "accentInvalid": "Saisissez une couleur au format #rrggbb ou oklch(L C H).",
     "language": "Langue",

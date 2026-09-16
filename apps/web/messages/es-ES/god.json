@@ -230,6 +230,8 @@
     "faviconUrlHint": "El icono que los navegadores muestran en la pestaña. Si se deja vacío se usa el original.",
     "accentColor": "Color de acento",
     "accentColorHint": "Un color hexadecimal (#1d4ed8) o un literal oklch(). Si se deja vacío se mantiene el gris original; el texto sobre ese color se elige para que sea legible.",
+    "releaseHistory": "Historial de versiones",
+    "releaseHistoryHint": "Indica si el pie de la barra lateral abre las notas de la versión. Solo el propietario de la instancia llega a ver ese clic, así que desactivarlo no oculta nada al equipo. El pie conserva la marca, el nombre y la versión en ejecución en ambos casos.",
     "urlInvalid": "Introduce una dirección que empiece por https://.",
     "accentInvalid": "Introduce un color como #rrggbb u oklch(L C H).",
     "language": "Idioma",
