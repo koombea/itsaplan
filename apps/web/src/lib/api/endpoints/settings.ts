@@ -1,5 +1,6 @@
 import { request } from '@/lib/api/core/client';
 import type { RegistrationMode } from '@/lib/api/endpoints/god';
+import type { Locale } from '@/i18n/locales';
 
 // Per-project auto-archive thresholds: days an issue may sit inactive in a
 // completed/canceled column before the worker archives it. null disables archiving
@@ -64,6 +65,28 @@ export type StorageSettingsPatch = Partial<StorageSettings>;
 // command left out keeps the binding from the layer below.
 export type HotkeyOverrides = Record<string, string>;
 
+// The product identity this instance presents in place of the built-in one. Every
+// field is stored as given; an empty one means the built-in value applies, which is
+// what makes an instance that never set any of them look exactly as it did before.
+export interface BrandingSettings {
+  appName: string;
+  siteUrl: string;
+  // Absolute https URL of the mark. Empty falls back to the built-in SVG.
+  logoUrl: string;
+  // A CSS color literal replacing --primary. Empty keeps the achromatic one.
+  accentColor: string;
+  // The line under the product name on the sign-in panel. Empty falls back to the
+  // translated one.
+  loginTagline: string;
+  // The language a visitor gets when neither their cookie nor their browser names
+  // one the instance ships.
+  defaultLocale: Locale;
+  // Absolute https URL of the browser tab icon. Empty falls back to app/icon.svg.
+  faviconUrl: string;
+}
+
+export type BrandingSettingsPatch = Partial<BrandingSettings>;
+
 // What the sign-in and sign-up screens read before there is a session. magicLink and
 // google are already resolved against their provider by the API, and
 // requireEmailVerification is cleared when the mail provider is removed, so a screen
@@ -82,6 +105,9 @@ export interface PublicAuthConfig {
   // OIDC is not offered, or when they left it blank.
   oidcLabel: string;
   hasUsers: boolean;
+  // Carried here rather than on a route of its own: every screen needs it, logged
+  // out included, and this is the one public read the logged-out screens already do.
+  branding: BrandingSettings;
 }
 
 // Project settings: MCP reachability and the enabled sections. Owner-only; the

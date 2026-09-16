@@ -30,4 +30,14 @@ describe('localeFromAcceptLanguage', () => {
   it('falls back to English when no requested language is supported', () => {
     assert.equal(localeFromAcceptLanguage('de-DE,ja;q=0.9'), 'en');
   });
+
+  it("uses the instance's own default when nothing requested is supported", () => {
+    assert.equal(localeFromAcceptLanguage('de-DE,ja;q=0.9', 'fr'), 'fr');
+    assert.equal(localeFromAcceptLanguage('de-DE,*;q=0.9', 'fr'), 'fr');
+    assert.equal(localeFromAcceptLanguage(null, 'fr'), 'fr');
+  });
+
+  it('prefers a language the browser asked for over the instance default', () => {
+    assert.equal(localeFromAcceptLanguage('uk-UA,uk;q=0.9', 'fr'), 'uk');
+  });
 });

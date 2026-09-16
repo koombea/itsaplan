@@ -26,6 +26,7 @@
     "typecheck": "turbo run typecheck && tsc --noEmit",
     "test": "bun test scripts/ && turbo run test --concurrency=1",
     "test:coverage": "cd apps/api && bun run test:coverage",
+    "screenshots": "bun --filter=web run screenshots",
     "db:generate": "bun --filter='@repo/db' run db:generate",
     "db:migrate": "bun --filter='@repo/db' run db:migrate",
     "db:migrate:test": "SKIP_PRE_MIGRATION_BACKUP=1 bun --env-file=.env.test packages/db/src/migrate.ts",

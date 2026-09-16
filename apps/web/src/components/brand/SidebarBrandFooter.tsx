@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import ItsAPlanMark from '@/components/brand/ItsAPlanMark';
+import AppLogo from '@/components/brand/AppLogo';
 import ReleaseHistory from '@/features/whats-new/components/ReleaseHistory';
+import { useBranding } from '@/context/brandingContext';
 import { useSession } from '@/lib/auth-client';
 import { cn } from '@/lib/utils';
 import { useAppVersionQuery, useUpdateStatusQuery } from '@/services/updates.service';
@@ -14,6 +15,7 @@ import { useAppVersionQuery, useUpdateStatusQuery } from '@/services/updates.ser
 // release notes from here — they are the one who upgrades the instance, so the
 // check is theirs alone (GET /god/updates). Everyone else sees the version only.
 export default function SidebarBrandFooter() {
+  const { appName } = useBranding();
   const { data: session } = useSession();
   // The session store can already be filled by the time React hydrates, while the
   // server rendered without it. Reading it only after mount keeps the server and
@@ -35,10 +37,10 @@ export default function SidebarBrandFooter() {
 
   const content = (
     <>
-      <ItsAPlanMark className="size-9 shrink-0 text-sidebar-foreground" />
+      <AppLogo className="size-9 shrink-0 text-sidebar-foreground" />
       <div className="grid text-left leading-none group-data-[collapsible=icon]:hidden">
         <span className="text-base font-semibold tracking-tight text-sidebar-foreground">
-          It&apos;s a Plan
+          {appName}
         </span>
         {newerVersion ? (
           <span className="mt-1 flex items-center gap-1.5 text-[10px] font-medium tracking-wider text-primary uppercase">

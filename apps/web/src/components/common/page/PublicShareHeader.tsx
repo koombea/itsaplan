@@ -1,5 +1,9 @@
-import ItsAPlanMark from '@/components/brand/ItsAPlanMark';
-import { APP_NAME, APP_SITE_URL } from '@/utils/app';
+'use client';
+
+import AppLogo from '@/components/brand/AppLogo';
+import { useBranding } from '@/context/brandingContext';
+import { APP_SITE_URL } from '@/utils/app';
+import { safeHttpsUrl } from '@/utils/branding';
 
 // The header over a public shared page (a board or an issue). It shows the project
 // name, the ticker, and an optional trailing label. On a board that label is the
@@ -14,6 +18,12 @@ export default function PublicShareHeader({
   ticker: string;
   trailing?: string;
 }) {
+  const { appName, siteUrl } = useBranding();
+  // This page carries no session, so the value reaches a visitor with no account
+  // behind them. The api refuses anything but an https URL, and an app_setting row
+  // written by hand never passed it.
+  const href = safeHttpsUrl(siteUrl) ?? APP_SITE_URL;
+
   return (
     <header className="flex shrink-0 items-center gap-3 border-b px-4 py-3">
       <div className="flex min-w-0 items-baseline gap-2">
@@ -29,13 +39,13 @@ export default function PublicShareHeader({
         )}
       </div>
       <a
-        href={APP_SITE_URL}
+        href={href}
         target="_blank"
         rel="noreferrer"
         className="ms-auto flex shrink-0 items-center gap-1.5 text-muted-foreground hover:text-foreground"
       >
-        <ItsAPlanMark className="size-5" />
-        <span className="text-sm font-semibold">{APP_NAME}</span>
+        <AppLogo className="size-5" />
+        <span className="text-sm font-semibold">{appName}</span>
       </a>
     </header>
   );

@@ -264,6 +264,7 @@ export const qk = {
   instanceTelegramSettings: ['instanceTelegramSettings'] as const,
   instanceProjectDefaults: ['instanceProjectDefaults'] as const,
   instanceStorageSettings: ['instanceStorageSettings'] as const,
+  instanceBrandingSettings: ['instanceBrandingSettings'] as const,
   // The upload limits as read by the upload UI (open to any signed-in user).
   storageSettings: ['storageSettings'] as const,
   // The running version (any signed-in user) and the upstream release check (god).

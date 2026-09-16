@@ -1,8 +1,13 @@
 import { DEFAULT_LOCALE, LOCALES, type Locale } from './locales';
 
 // Keep this matcher aligned with the API copy so the first server render and
-// an account without saved preferences resolve to the same language.
-export function localeFromAcceptLanguage(value: string | null): Locale {
+// an account without saved preferences resolve to the same language. `fallback` is
+// the instance's own default language, which only decides the case where the browser
+// asked for nothing this app ships.
+export function localeFromAcceptLanguage(
+  value: string | null,
+  fallback: Locale = DEFAULT_LOCALE,
+): Locale {
   const requested = (value ?? '')
     .split(',')
     .map((part, index) => {
@@ -18,7 +23,7 @@ export function localeFromAcceptLanguage(value: string | null): Locale {
     .sort((a, b) => b.quality - a.quality || a.index - b.index);
 
   for (const { tag } of requested) {
-    if (tag === '*') return DEFAULT_LOCALE;
+    if (tag === '*') return fallback;
 
     const exact = LOCALES.find((locale) => locale.toLowerCase() === tag);
     if (exact) return exact;
@@ -28,5 +33,5 @@ export function localeFromAcceptLanguage(value: string | null): Locale {
     if (sameLanguage) return sameLanguage;
   }
 
-  return DEFAULT_LOCALE;
+  return fallback;
 }

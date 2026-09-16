@@ -29,4 +29,17 @@ describe('localeFromAcceptLanguage', () => {
   it('falls back to English when no requested language is supported', () => {
     expect(localeFromAcceptLanguage('de-DE,ja;q=0.9')).toBe('en');
   });
+
+  // The instance's own default language, which decides the language of an account
+  // that never saved one. Without it this endpoint answers 'en' and PreferencesSync
+  // writes that into the locale cookie, undoing the branded default on first load.
+  it('uses the instance default when no requested language is supported', () => {
+    expect(localeFromAcceptLanguage('de-DE,ja;q=0.9', 'es-ES')).toBe('es-ES');
+    expect(localeFromAcceptLanguage('de-DE,*;q=0.9', 'es-ES')).toBe('es-ES');
+    expect(localeFromAcceptLanguage(null, 'es-ES')).toBe('es-ES');
+  });
+
+  it('keeps a supported browser language over the instance default', () => {
+    expect(localeFromAcceptLanguage('fr-FR,fr;q=0.9', 'es-ES')).toBe('fr');
+  });
 });

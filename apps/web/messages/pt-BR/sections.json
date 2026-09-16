@@ -39,6 +39,10 @@
       "label": "Armazenamento",
       "description": "Quanto as pessoas podem enviar: o tamanho de um único arquivo, os tipos de anexo aceitos e o armazenamento que cada projeto recebe."
     },
+    "branding": {
+      "label": "Identidade visual",
+      "description": "A identidade de produto que esta instância apresenta: nome, logotipo, cor de destaque e idioma padrão. Um campo vazio mantém o valor original."
+    },
     "telegram": {
       "label": "Telegram",
       "description": "O bot ao qual as pessoas conectam sua conta do Telegram, e o que entrega notificações do Telegram para projetos que não definem seu próprio bot."

@@ -39,6 +39,10 @@
       "label": "存储",
       "description": "设置单个文件大小、允许的附件类型和每个项目的存储配额。"
     },
+    "branding": {
+      "label": "品牌",
+      "description": "本实例呈现的产品标识：名称、徽标、强调色和默认语言。留空的字段保持内置值。"
+    },
     "telegram": {
       "label": "Telegram",
       "description": "设置用户关联 Telegram 账户所用的机器人，以及项目未单独配置时发送通知的机器人。"

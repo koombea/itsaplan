@@ -5,6 +5,8 @@ import type { NotificationEncryption } from '@/lib/api/endpoints/notificationSet
 import type { Permissions } from '@/lib/api/endpoints/roles';
 import type { ProjectDefaults } from '@/lib/api/endpoints/projects';
 import type {
+  BrandingSettings,
+  BrandingSettingsPatch,
   HotkeyOverrides,
   StorageSettings,
   StorageSettingsPatch,
@@ -274,6 +276,15 @@ export const getInstanceStorageSettings = () => request<StorageSettings>('/god/s
 
 export const updateInstanceStorageSettings = (patch: StorageSettingsPatch) =>
   request<StorageSettings>('/god/storage-settings', {
+    method: 'PUT',
+    body: JSON.stringify(patch),
+  });
+
+export const getInstanceBrandingSettings = () =>
+  request<BrandingSettings>('/god/branding-settings');
+
+export const updateInstanceBrandingSettings = (patch: BrandingSettingsPatch) =>
+  request<BrandingSettings>('/god/branding-settings', {
     method: 'PUT',
     body: JSON.stringify(patch),
   });

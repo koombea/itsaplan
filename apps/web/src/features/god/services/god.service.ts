@@ -7,7 +7,7 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
-import type { StorageSettingsPatch } from '@/lib/api/endpoints/settings';
+import type { BrandingSettingsPatch, StorageSettingsPatch } from '@/lib/api/endpoints/settings';
 import type { ProjectDefaults } from '@/lib/api/endpoints/projects';
 import { nextPageParam, type PageParams } from '@/lib/api/core/paging';
 import { DEFAULT_PAGE_SIZE } from '@/hooks/usePaging';
@@ -33,6 +33,8 @@ import {
   updateInstanceProjectDefaults,
   getInstanceStorageSettings,
   updateInstanceStorageSettings,
+  getInstanceBrandingSettings,
+  updateInstanceBrandingSettings,
   listInstanceUsers,
   getInstanceUser,
   deleteInstanceUser,
@@ -239,6 +241,23 @@ export function useUpdateInstanceStorageSettings() {
       // The upload UI reads the same limits through the open endpoint.
       qc.setQueryData(qk.storageSettings, data);
     },
+  });
+}
+
+// The product identity the instance presents. A save reaches every screen on the
+// next server render, which reads it from /auth-config rather than from this cache.
+export function useInstanceBrandingSettingsQuery() {
+  return useQuery({
+    queryKey: qk.instanceBrandingSettings,
+    queryFn: () => getInstanceBrandingSettings(),
+  });
+}
+
+export function useUpdateInstanceBrandingSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: BrandingSettingsPatch) => updateInstanceBrandingSettings(patch),
+    onSuccess: (data) => qc.setQueryData(qk.instanceBrandingSettings, data),
   });
 }
 

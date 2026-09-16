@@ -1,10 +1,11 @@
 import { runtimeEnv } from './runtimeEnv';
 
-// The product name shown to users: the login panel, the passkey label in the OS
-// picker, and the account page. It is defined once, so a rebrand is one edit.
+// The built-in product identity. An instance overrides both in god mode, so a
+// screen reads what it shows from useBranding() (context/brandingContext) and these
+// are only what DEFAULT_BRANDING falls back to. Keep them equal to defaultBranding()
+// in the api, which is what an instance with no stored row answers with.
 export const APP_NAME = "It's a Plan";
 
-// The product site. The product mark on the public share pages links to it.
 export const APP_SITE_URL = 'https://itsaplan.dev/';
 
 // The legal document URLs, linked from the logged-out screens: Google requires the

@@ -5,6 +5,7 @@ import {
   Keyboard,
   KeyRound,
   Mail,
+  Palette,
   Send,
   SlidersHorizontal,
   Users,
@@ -65,6 +66,11 @@ export const GOD_SECTIONS: GodSection[] = [
     slug: 'storage',
     group: 'instance',
     icon: HardDrive,
+  },
+  {
+    slug: 'branding',
+    group: 'instance',
+    icon: Palette,
   },
   {
     slug: 'telegram',
