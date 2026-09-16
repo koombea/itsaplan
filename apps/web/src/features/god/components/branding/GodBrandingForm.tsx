@@ -145,7 +145,11 @@ export default function GodBrandingForm({ settings }: { settings: BrandingSettin
               title={t('releaseHistory')}
               description={t('releaseHistoryHint')}
               control={
+                // SettingsRow prints the title as a sibling of the control, so the switch
+                // itself carries no text: a screen reader would announce it unnamed, and
+                // the one thing the listener needs is which setting it toggles.
                 <Switch
+                  aria-label={t('releaseHistory')}
                   checked={form.releaseHistoryEnabled}
                   onCheckedChange={(releaseHistoryEnabled) => set({ releaseHistoryEnabled })}
                 />
