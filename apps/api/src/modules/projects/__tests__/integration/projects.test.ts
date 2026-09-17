@@ -31,6 +31,18 @@ async function viewOf(client: Api, projectKey: string) {
   return client.projects({ projectKey }).get();
 }
 
+// Signs up a user and puts them in the team through the invite flow, as a plain
+// member. They keep the team their own account was given, so they are now in two.
+async function joinTeam(asOwner: Api, teamId: number) {
+  const user = await signUpTestUser();
+  const invite = await asOwner
+    .teams({ teamId })
+    .invites.post({ email: user.email, role: 'member' });
+  const api = authedApi(user.cookie);
+  await api.invites({ token: invite.data!.token }).accept.post();
+  return { user, api };
+}
+
 describe('projects', () => {
   beforeEach(async () => {
     await resetDb();
@@ -69,6 +81,67 @@ describe('projects', () => {
         teamId: created.data?.teamId,
         teamName: user.username,
       });
+    });
+
+    // A caller who owns two teams names the one the project goes to. The default
+    // resolves to the lowest team id they own, which is the host team here, so the
+    // guest naming their own team is what the default would not have picked.
+    it('puts the project in the team named by teamId', async () => {
+      const host = await signUpClient();
+      const hostTeamId = (await host.api.teams.get()).data![0].id;
+      const guest = await joinTeam(host.api, hostTeamId);
+      const guestOwnTeamId = (await guest.api.teams.get()).data!.find(
+        (one) => one.id !== hostTeamId,
+      )!.id;
+      await host.api
+        .teams({ teamId: hostTeamId })
+        .members({ userId: guest.user.userId })
+        .patch({ role: 'owner' });
+
+      const created = await guest.api.projects.post({
+        key: 'MKT',
+        name: 'Marketing',
+        teamId: guestOwnTeamId,
+      });
+      expect(created.status).toBe(201);
+      expect(created.data).toMatchObject({
+        teamId: guestOwnTeamId,
+        teamName: guest.user.username,
+      });
+    });
+
+    it('refuses a team the caller is in but does not own', async () => {
+      const host = await signUpClient();
+      const hostTeamId = (await host.api.teams.get()).data![0].id;
+      const guest = await joinTeam(host.api, hostTeamId);
+
+      const created = await guest.api.projects.post({
+        key: 'MKT',
+        name: 'Marketing',
+        teamId: hostTeamId,
+      });
+      expect(created.status).toBe(403);
+    });
+
+    // A team the caller is not in reads as missing, the same as one that does not
+    // exist: every team route hides it that way.
+    it('refuses a team the caller is not in at all', async () => {
+      const host = await signUpClient();
+      const hostTeamId = (await host.api.teams.get()).data![0].id;
+      const stranger = await signUpClient();
+
+      const created = await stranger.api.projects.post({
+        key: 'MKT',
+        name: 'Marketing',
+        teamId: hostTeamId,
+      });
+      expect(created.status).toBe(404);
+    });
+
+    it('refuses a team that does not exist', async () => {
+      const { api } = await signUpClient();
+      const created = await api.projects.post({ key: 'MKT', name: 'Marketing', teamId: 999999 });
+      expect(created.status).toBe(404);
     });
 
     it('stores a provided description', async () => {
