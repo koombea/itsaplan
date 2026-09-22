@@ -7,6 +7,9 @@ import {
 } from '@repo/db';
 import type { Locale } from '#modules/user-preferences/locale';
 
+// The instance settings kept in app_setting: the upload limits and the keyboard
+// shortcuts.
+
 // Instance-wide upload limits (app_setting key 'storage'). getStorageSettings/
 // mimeAllowed/MB/StorageSettings live in @repo/db (packages/db/src/domains/storage.ts) —
 // the worker checks an imported Plane attachment against the same limits. This module
