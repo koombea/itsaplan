@@ -15,9 +15,15 @@ jobs:
     name: Check for AI attribution
     runs-on: ubuntu-latest
     steps:
+      # Check out the base ref so the gate runs its own copy of the script,
+      # not the one a pull request could have weakened.
       - uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 0
+
+      - name: Fetch the pull request head
+        run: git fetch --no-tags origin ${{ github.event.pull_request.head.sha }}
 
       - uses: oven-sh/setup-bun@v2
         with:

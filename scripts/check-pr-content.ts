@@ -1,9 +1,11 @@
 #!/usr/bin/env bun
 /**
- * PR content gate: rejects AI attribution markers left in a pull request —
- * "Co-Authored-By" lines naming an AI assistant, assistant tool URLs, and
- * "Generated with ..." phrasing. It scans the PR title, the PR body, every
- * commit message in the range, and every line added by the diff.
+ * PR content gate: rejects a Co-Authored-By trailer naming Claude, Anthropic,
+ * Copilot, Cursor, ChatGPT, GPT-4/3.5, OpenAI, Codex or Gemini; a claude.ai/code
+ * or claude.com/claude-code URL; "Generated with Claude Code" phrasing (English
+ * or Spanish); and a generic "generated"/"co-authored" word near Claude, Copilot,
+ * Cursor or ChatGPT. Scans the PR title, the PR body, every commit message in
+ * the range, and every line added by the diff.
  */
 
 type Violation = {
@@ -42,8 +44,19 @@ function hasAIAttribution(line: string): boolean {
   return AI_ATTRIBUTION_PATTERNS.some((pattern) => pattern.test(line));
 }
 
-// This file spells the markers out, so scanning it would always report itself.
+// This file spells the markers out inside AI_ATTRIBUTION_PATTERNS, so only the
+// lines of that array literal are exempt from its own scan — every other added
+// line in this file, including one impersonating an exemption, is still scanned.
 const SELF = 'scripts/check-pr-content.ts';
+
+function selfPatternRange(): { start: number; end: number } | undefined {
+  const content = git('show', `${headArg}:${SELF}`);
+  const lines = content.split('\n');
+  const start = lines.findIndex((line) => line.includes('AI_ATTRIBUTION_PATTERNS'));
+  if (start === -1) return undefined;
+  const end = lines.findIndex((line, index) => index > start && line.trim() === '];');
+  return end === -1 ? undefined : { start: start + 1, end: end + 1 };
+}
 
 const violations: Violation[] = [];
 
@@ -63,42 +76,50 @@ if (process.env.PR_BODY) {
   scanBlock('PR body', process.env.PR_BODY);
 }
 
-// Separate commit records with a control character that never appears in a commit
-// message, and hash/message within a record the same way.
-const RECORD_SEP = '\x1e';
-const FIELD_SEP = '\x1f';
-const log = git('log', `${baseArg}..${headArg}`, `--format=%H${FIELD_SEP}%B${RECORD_SEP}`);
-for (const record of log.split(RECORD_SEP)) {
-  if (!record.trim()) continue;
-  const sepIndex = record.indexOf(FIELD_SEP);
-  if (sepIndex === -1) continue;
-  const hash = record.slice(0, sepIndex);
-  const message = record.slice(sepIndex + FIELD_SEP.length);
+const hashes = git('log', '--format=%H', `${baseArg}..${headArg}`).split('\n').filter(Boolean);
+for (const hash of hashes) {
+  const message = git('log', '-1', '--format=%B', hash);
   scanBlock(`commit ${hash.slice(0, 7)}`, message);
 }
 
+const selfRange = selfPatternRange();
 const diff = git('diff', '--unified=0', `${baseArg}...${headArg}`);
 let currentPath: string | undefined;
 let newLineNo = 0;
+let inHunk = false;
 for (const line of diff.split('\n')) {
-  if (line.startsWith('+++ ')) {
+  if (line.startsWith('diff --git ')) {
+    inHunk = false;
+    continue;
+  }
+  if (!inHunk && line.startsWith('+++ ')) {
     const path = line.slice(4).trim();
     currentPath = path === '/dev/null' || !path.startsWith('b/') ? undefined : path.slice(2);
     continue;
   }
-  if (line.startsWith('--- ')) {
+  if (!inHunk && line.startsWith('--- ')) {
     continue;
   }
   const hunkMatch = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
   if (hunkMatch) {
+    inHunk = true;
     newLineNo = Number(hunkMatch[1]);
     continue;
   }
-  if (line.startsWith('+')) {
+  if (inHunk && line.startsWith('+')) {
     const content = line.slice(1);
-    if (currentPath && currentPath !== SELF && hasAIAttribution(content)) {
+    const exempt =
+      currentPath === SELF &&
+      selfRange !== undefined &&
+      newLineNo >= selfRange.start &&
+      newLineNo <= selfRange.end;
+    if (currentPath && !exempt && hasAIAttribution(content)) {
       violations.push({ path: currentPath, line: newLineNo, text: content.trim() });
     }
+    newLineNo++;
+    continue;
+  }
+  if (inHunk && line.startsWith(' ')) {
     newLineNo++;
     continue;
   }
