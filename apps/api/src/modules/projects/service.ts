@@ -30,6 +30,7 @@ import { PROJECT_FEATURES, featureLabel, type ProjectFeature } from '#shared/fea
 import { getLimits } from '#shared/limits';
 import { deleteThreadsWhere } from '#modules/agents/core/runtime/memory';
 import { getProjectDefaults } from '#modules/settings/service';
+import { getTeamMembership } from '#modules/teams/service';
 import { dropUnusedTeamMembership } from '#modules/scim/reconcile';
 import { deleteObjects } from '@repo/storage';
 import { lockAttachmentStorage } from '#modules/attachments/storage';
@@ -252,8 +253,8 @@ export async function getProjectTeamId(projectId: number): Promise<number> {
   return rows[0].teamId;
 }
 
-// The team a new project belongs to. `teamId` names it explicitly (the caller's
-// rank in it is checked by the route); without one it is the team the caller owns.
+// The team a new project belongs to. `teamId` names it explicitly and the caller
+// must own it; without one it is the team the caller owns.
 export async function targetTeam(userId: string, teamId?: number): Promise<TargetTeam> {
   if (teamId == null) return ownedTeam(userId);
   const [row] = await db
@@ -261,6 +262,11 @@ export async function targetTeam(userId: string, teamId?: number): Promise<Targe
     .from(team)
     .where(eq(team.id, teamId));
   if (!row) throw new HttpError(404, 'Team not found');
+  // Ownership, not management: the project would carry an owner the team's owners
+  // never agreed to. A team the caller is not in reads as missing, as on every team route.
+  const standing = await getTeamMembership(row.id, userId);
+  if (!standing) throw new HttpError(404, 'Team not found');
+  if (standing !== 'owner') throw new HttpError(403, 'Only a team owner can do this');
   return row;
 }
 
