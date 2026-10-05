@@ -31,6 +31,14 @@ export const createProjectBody = t.Composite([
         { description: `Issue-type preset: ${ISSUE_TYPE_PRESET_KEYS.join(', ')}.` },
       ),
     ),
+    teamId: t.Optional(
+      t.Integer({
+        minimum: 1,
+        description:
+          'Team to create the project in. You must own it. Omitted, the project goes ' +
+          'to the team you own.',
+      }),
+    ),
   }),
 ]);
 

@@ -4,7 +4,7 @@ import { noContent } from '#shared/http';
 import { HttpError } from '#shared/lib';
 import { authContext } from '#shared/auth-context';
 import { guards } from '#shared/guards';
-import { requireUser } from '#shared/access';
+import { requireTeamMembership, requireUser } from '#shared/access';
 import { isMcpRequest } from '#shared/mcp-request';
 import { accessErrors, commonErrors, errors } from '#shared/responses';
 import { getMemberContext, listAssigneeCandidates } from '#modules/members/service';
@@ -79,18 +79,26 @@ export const projectRoutes = new Elysia({ name: 'projects', detail: { tags: ['Pr
   .post(
     '/projects',
     async ({ body, user, set }) => {
+      const { teamId, ...meta } = body;
+      // Ownership, not management: the project would carry an owner the team's owners
+      // never agreed to. A team the caller is not in reads as missing.
+      if (teamId !== undefined) {
+        const { role } = await requireTeamMembership(teamId, user);
+        if (role !== 'owner') throw new HttpError(403, 'Only a team owner can do this');
+      }
       set.status = 201;
-      return createProject(body, requireUser(user).id);
+      return createProject(meta, requireUser(user).id, teamId);
     },
     {
       body: createProjectBody,
-      response: { 201: ProjectResponse, ...errors(400, 401) },
+      response: { 201: ProjectResponse, ...commonErrors },
       detail: {
         summary: 'Create a project',
         description:
           'Create a project you own. `key` is the unique, immutable prefix for issue ids ' +
           "(e.g. 'MKT' -> 'MKT-1'). Seeds the default columns and the issue types of the " +
-          'chosen `preset`.',
+          'chosen `preset`. The project goes to the team you own; a caller who owns more ' +
+          'than one names the team with `teamId`, which list_teams reports.',
         ...mcpTool('create_project'),
       },
     },
