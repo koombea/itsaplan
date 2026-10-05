@@ -144,6 +144,24 @@ describe('projects', () => {
       expect(created.status).toBe(404);
     });
 
+    // The team route shares targetTeam and lets a manager create, so the owner rule
+    // of create_project must not reach it.
+    it('still lets a team manager create through the team route', async () => {
+      const host = await signUpClient();
+      const hostTeamId = (await host.api.teams.get()).data![0].id;
+      const guest = await joinTeam(host.api, hostTeamId);
+      await host.api
+        .teams({ teamId: hostTeamId })
+        .members({ userId: guest.user.userId })
+        .patch({ role: 'manager' });
+
+      const created = await guest.api
+        .teams({ teamId: hostTeamId })
+        .projects.post({ key: 'MKT', name: 'Marketing' });
+      expect(created.status).toBe(201);
+      expect(created.data).toMatchObject({ teamId: hostTeamId });
+    });
+
     it('stores a provided description', async () => {
       const { api } = await signUpClient();
       const created = await api.projects.post({
