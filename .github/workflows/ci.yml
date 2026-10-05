@@ -19,7 +19,7 @@ permissions:
 jobs:
   quality:
     name: Format, lint, typecheck
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","koombea-ci"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -54,7 +54,7 @@ jobs:
 
   build:
     name: Build apps
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","koombea-ci"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -76,7 +76,7 @@ jobs:
 
   test:
     name: Test suite
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","koombea-ci"]') || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v7
 
