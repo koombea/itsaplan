@@ -1,11 +1,8 @@
 #!/usr/bin/env bun
 /**
- * PR content gate: rejects a Co-Authored-By trailer naming Claude, Anthropic,
- * Copilot, Cursor, ChatGPT, GPT-4/3.5, OpenAI, Codex or Gemini; a claude.ai/code
- * or claude.com/claude-code URL; "Generated with Claude Code" phrasing (English
- * or Spanish); and a generic "generated"/"co-authored" word near Claude, Copilot,
- * Cursor or ChatGPT. Scans the PR title, the PR body, every commit message in
- * the range, and every line added by the diff.
+ * PR content gate: rejects AI assistant attribution, matched by
+ * AI_ATTRIBUTION_PATTERNS below. Scans the PR title, the PR body, every commit
+ * message in the range, and every line added by the diff.
  */
 
 type Violation = {
@@ -50,8 +47,10 @@ function hasAIAttribution(line: string): boolean {
 const SELF = 'scripts/check-pr-content.ts';
 
 function selfPatternRange(): { start: number; end: number } | undefined {
-  const content = git('show', `${headArg}:${SELF}`);
-  const lines = content.split('\n');
+  // A pull request branched before the gate landed has no copy of this file.
+  const result = Bun.spawnSync(['git', 'show', `${headArg}:${SELF}`]);
+  if (result.exitCode !== 0) return undefined;
+  const lines = new TextDecoder().decode(result.stdout).split('\n');
   const start = lines.findIndex((line) => line.includes('AI_ATTRIBUTION_PATTERNS'));
   if (start === -1) return undefined;
   const end = lines.findIndex((line, index) => index > start && line.trim() === '];');

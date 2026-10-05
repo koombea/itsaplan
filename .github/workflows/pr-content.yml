@@ -25,6 +25,13 @@ jobs:
       - name: Fetch the pull request head
         run: git fetch --no-tags origin ${{ github.event.pull_request.head.sha }}
 
+      # The pull request that adds the gate has no copy on its base yet.
+      - name: Take the pull request's copy when the base has none
+        run: |
+          if [ ! -f scripts/check-pr-content.ts ]; then
+            git show "${{ github.event.pull_request.head.sha }}:scripts/check-pr-content.ts" > scripts/check-pr-content.ts
+          fi
+
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
