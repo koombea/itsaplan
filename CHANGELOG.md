@@ -1,5 +1,64 @@
 # Changelog
 
+## [1.1.0](https://github.com/koombea/itsaplan/compare/v1.0.0...v1.1.0) (2026-09-22)
+
+
+### Features
+
+* add personal activity scope to the pulse widget ([#384](https://github.com/koombea/itsaplan/issues/384)) ([945fef2](https://github.com/koombea/itsaplan/commit/945fef2858b42f0edc3564f8200c9ef82841b2c4))
+* add personal project navigation and discovery ([#365](https://github.com/koombea/itsaplan/issues/365)) ([8c5cbdf](https://github.com/koombea/itsaplan/commit/8c5cbdf5854367ffb9279597de1389d3d6483d2c))
+* **chat:** make the two AG-UI event caps configurable ([c819b65](https://github.com/koombea/itsaplan/commit/c819b656c4c94ce6d924e948fc9c15c16f48c5b6))
+* **coolify:** let an instance point storage at a hosted bucket ([c7a01ff](https://github.com/koombea/itsaplan/commit/c7a01ffb434994eee56ff195068af7ae928c131d))
+* **coolify:** let an instance point storage at a hosted bucket ([f1267e2](https://github.com/koombea/itsaplan/commit/f1267e208ff3f184e54310aa0a26359c8aa0c38d))
+* **god:** instance branding overrides ([9317115](https://github.com/koombea/itsaplan/commit/9317115f19e660d90d3d32b4692eea5dff8c4132))
+* **god:** instance branding overrides ([7b5ed06](https://github.com/koombea/itsaplan/commit/7b5ed060a66cdc382b90019d1e8a3abc3c8f4cfc))
+* **god:** let an instance turn off the release history panel ([04f4686](https://github.com/koombea/itsaplan/commit/04f46866cd5d11b5bc771f51535b60c5c08c5119))
+* implement Plane import/export with job management and UI ([#389](https://github.com/koombea/itsaplan/issues/389)) ([88a43a9](https://github.com/koombea/itsaplan/commit/88a43a9197f46c43a68d41c9f69ded829fcad74f))
+* import/export with Plane (upstream PR [#389](https://github.com/koombea/itsaplan/issues/389)) on top of upstream main ([c386403](https://github.com/koombea/itsaplan/commit/c386403459514cac0e0645bc267bcc600173d15b))
+* improve Docs navigation and collaborative editing ([#386](https://github.com/koombea/itsaplan/issues/386)) ([0ff436b](https://github.com/koombea/itsaplan/commit/0ff436b1982e15175c9068cb04c8c62a26e20be1))
+* let an instance turn off the release history panel ([db6e7d4](https://github.com/koombea/itsaplan/commit/db6e7d4933d0ebdec3b45e7867b214e6806d002b))
+* open sign-up on a fresh instance and offer a data reset in setup ([#410](https://github.com/koombea/itsaplan/issues/410)) ([1a74321](https://github.com/koombea/itsaplan/commit/1a743218fd0ff09714ee8acb71ccbc07b76483a2))
+
+
+### Improvements
+
+* load visible mobile link previews with backend caching ([#393](https://github.com/koombea/itsaplan/issues/393)) ([f3bd992](https://github.com/koombea/itsaplan/commit/f3bd992c000a5d5e5751bc95644e820cab941d93))
+* **web:** confirm before deleting an attachment ([#415](https://github.com/koombea/itsaplan/issues/415)) ([2aa58ec](https://github.com/koombea/itsaplan/commit/2aa58ec689704c7e26b94643a25ca522fd45dca8))
+* **web:** show subtask progress bar inline in the card header ([#419](https://github.com/koombea/itsaplan/issues/419)) ([f063c5d](https://github.com/koombea/itsaplan/commit/f063c5d7575c53d4cfa4523ff88f1dcf0145e919))
+* **web:** split Import/Export into tabs with a source picker ([#420](https://github.com/koombea/itsaplan/issues/420)) ([e21d56d](https://github.com/koombea/itsaplan/commit/e21d56d2413e5806a6823aca009ff2f244bc64d0))
+
+
+### Bug Fixes
+
+* **api:** answer an unset language with the instance default ([d9ea3b7](https://github.com/koombea/itsaplan/commit/d9ea3b7d91d1ad790b1cc6202da9397783ef7bd4))
+* **api:** bound issue texts and make the mention scan linear ([#353](https://github.com/koombea/itsaplan/issues/353)) ([03ee5a8](https://github.com/koombea/itsaplan/commit/03ee5a88b52a340828ab354706c06ddd33524807))
+* **charts:** use quay.io MinIO images in Helm chart values ([#405](https://github.com/koombea/itsaplan/issues/405)) ([e55907e](https://github.com/koombea/itsaplan/commit/e55907eb8b68fdc9acf237e35ddc9b937c5d40da))
+* **god:** name the release-history switch for a screen reader ([0f9464a](https://github.com/koombea/itsaplan/commit/0f9464a2a0ce2589a921ab45b99f9fd4b4d038b7))
+* **god:** refuse a blank identity and a translucent accent ([93ed69b](https://github.com/koombea/itsaplan/commit/93ed69b278de6aaa40ed9e573cb7ed68d4ab317e))
+* **runner:** cut oversized tool text to the limit, ellipsis included ([f3504a6](https://github.com/koombea/itsaplan/commit/f3504a6b996d015fb45af1bf01686ffa79778ffb))
+* **runner:** cut oversized tool text to the limit, ellipsis included ([9277f29](https://github.com/koombea/itsaplan/commit/9277f291e5945123b7b5ad1807425d1bbe3e78a9))
+* **web:** add es-ES translations for import/export ([43b00d2](https://github.com/koombea/itsaplan/commit/43b00d29410effc38622f0ad622a03c6ae6da3d5))
+* **web:** bound the branding read so a stalled api cannot hang a render ([e80eed8](https://github.com/koombea/itsaplan/commit/e80eed84f35b50a43923d2dd4438381c3cfe522c))
+* **web:** keep dashboard overview accessible ([#385](https://github.com/koombea/itsaplan/issues/385)) ([9bbf0aa](https://github.com/koombea/itsaplan/commit/9bbf0aa81e49f03e094b56b65d28e9dc318743e5))
+* **web:** open description links on touch taps ([#391](https://github.com/koombea/itsaplan/issues/391)) ([0110de8](https://github.com/koombea/itsaplan/commit/0110de89e6fc1c21a85ebe33050b730f2ee558fa))
+* **web:** restore image annotation on new and existing issues ([#407](https://github.com/koombea/itsaplan/issues/407)) ([63c41cd](https://github.com/koombea/itsaplan/commit/63c41cd2aee6ead486c58d3ba9a308bfe309e162))
+* **web:** validate the branded site url where it becomes a public href ([bf5d662](https://github.com/koombea/itsaplan/commit/bf5d6620bbb73c2b508de1603ad919e54292c8ca))
+* **worker:** harden html-to-markdown tag stripping and entity decoding ([9716863](https://github.com/koombea/itsaplan/commit/971686321f462c0b7b3b39b188877c3960868912))
+
+
+### CI
+
+* drop the CLA check from the fork ([#9](https://github.com/koombea/itsaplan/issues/9)) ([2f25f4d](https://github.com/koombea/itsaplan/commit/2f25f4d1eb616e146e65c59e7dea899312f8caf4))
+
+
+### Chores
+
+* merge upstream/main into the fork ([5a442ca](https://github.com/koombea/itsaplan/commit/5a442ca7fcd8b90486411177044c71e28f7ab429))
+* merge upstream/main into the fork ([6fb8ef8](https://github.com/koombea/itsaplan/commit/6fb8ef84767ba5a9654af87f760e4c777886c253))
+* remove unused PR screenshots ([#418](https://github.com/koombea/itsaplan/issues/418)) ([03868b7](https://github.com/koombea/itsaplan/commit/03868b7b3664aefccf6cfd4d4aa5f7a0d673c168))
+* run the screenshots command from the repo root ([4f24d85](https://github.com/koombea/itsaplan/commit/4f24d852dfcb1f1766b697f90eaf37e3cfcabcee))
+* **web:** a command that takes the screenshots a UI change is judged on ([1021293](https://github.com/koombea/itsaplan/commit/10212935ed2b0d9a9a45ae86adc058f55038e204))
+
 ## [1.0.0](https://github.com/croffasia/itsaplan/compare/v0.17.0...v1.0.0) (2026-09-15)
 
 
