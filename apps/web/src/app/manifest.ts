@@ -1,6 +1,9 @@
 import type { MetadataRoute } from 'next';
 import { serverBranding } from '@/utils/branding';
 
+// Rendered per request: a build has no api to ask, and would freeze the built-in name.
+export const dynamic = 'force-dynamic';
+
 // Makes the app installable: Add to Dock in Safari, Install in Chrome and Edge,
 // Add to Home Screen on a phone. The colours are the light theme's `--background`;
 // the browser chrome follows the viewport `themeColor` in the root layout instead,
