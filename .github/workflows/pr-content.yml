@@ -1,0 +1,47 @@
+name: PR content gate
+
+# pull_request_target takes this workflow and the script from the base branch, so a pull
+# request cannot change the gate that judges it. The pull request is only read as git data;
+# none of its code is run.
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+env:
+  BUN_VERSION: 1.4.4
+
+jobs:
+  ai-attribution:
+    name: Check for AI attribution
+    runs-on: ubuntu-latest
+    steps:
+      # The latest commit of the base branch: base.sha can predate the gate itself.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The pull request ref also holds heads that live in a fork.
+      - name: Fetch the pull request head
+        run: git fetch --no-tags origin "+refs/pull/${{ github.event.pull_request.number }}/head:refs/remotes/pr/head"
+
+      # Commits a sync brings in from upstream are not checked.
+      - name: Fetch upstream
+        run: git fetch --no-tags https://github.com/croffasia/itsaplan.git +refs/heads/main:refs/remotes/upstream/main
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Check PR content
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: >
+          bun run scripts/check-pr-content.ts
+          "${{ github.event.pull_request.base.sha }}"
+          "${{ github.event.pull_request.head.sha }}"
+          refs/remotes/upstream/main
