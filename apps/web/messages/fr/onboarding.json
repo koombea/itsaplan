@@ -1,5 +1,5 @@
 {
-  "label": "Bienvenue dans {appName}",
+  "label": "Bienvenue dans {app}",
   "goTo": "Aller à la diapositive {number}",
   "next": "Suivant",
   "start": "Commencer",

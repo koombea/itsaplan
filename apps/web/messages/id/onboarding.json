@@ -1,5 +1,5 @@
 {
-  "label": "Selamat datang di {appName}",
+  "label": "Selamat datang di {app}",
   "goTo": "Buka slide {number}",
   "next": "Berikutnya",
   "start": "Mulai",

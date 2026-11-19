@@ -49,7 +49,7 @@ export default function OnboardingDialog({ onClose }: { onClose: () => void }) {
         aria-describedby={undefined}
         className="gap-0 overflow-hidden p-0 sm:max-w-[640px]"
       >
-        <DialogTitle className="sr-only">{t('label', { appName })}</DialogTitle>
+        <DialogTitle className="sr-only">{t('label', { app: appName })}</DialogTitle>
         <div
           ref={trackRef}
           onScroll={onScroll}

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readdirSync, readFileSync } from 'node:fs';
 import { afterEach, beforeEach, it } from 'node:test';
 import { act } from 'react';
 import type { Root } from 'react-dom/client';
@@ -66,4 +67,18 @@ it('welcomes a person to the product under its branded name', async () => {
 
   const title = document.querySelector('[role="dialog"] h2');
   assert.equal(title?.textContent, 'Welcome to Acme Tracker');
+});
+
+// The tour's title names the product, which an instance renames with its branding.
+it('names the product through the branded name in every language', () => {
+  const messagesDir = new URL('../../../../messages/', import.meta.url);
+  const locales = readdirSync(messagesDir);
+  assert.ok(locales.length > 1);
+  for (const locale of locales) {
+    const { label } = JSON.parse(
+      readFileSync(new URL(`${locale}/onboarding.json`, messagesDir), 'utf8'),
+    ) as { label: string };
+    assert.match(label, /\{app\}/, locale);
+    assert.doesNotMatch(label, /It's a Plan/, locale);
+  }
 });

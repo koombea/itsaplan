@@ -1,5 +1,5 @@
 {
-  "label": "{appName}에 오신 것을 환영합니다",
+  "label": "{app}에 오신 것을 환영합니다",
   "goTo": "{number}번 슬라이드로 이동",
   "next": "다음",
   "start": "시작하기",
