@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { useBranding } from '@/context/brandingContext';
 import { APP_NAME } from '@/utils/app';
 
 // The layers a screen's title can come from. A higher one wins while it is mounted:
@@ -11,6 +12,8 @@ type TitleLayer = keyof typeof RANK;
 
 type Entry = { title: string; rank: number };
 const entries = new Set<Entry>();
+// The instance's own name, shown when no layer names the screen.
+let fallbackTitle = APP_NAME;
 
 let headObserver: MutationObserver | null = null;
 let observedHead: HTMLHeadElement | null = null;
@@ -20,7 +23,7 @@ function apply() {
   for (const entry of entries) if (!top || entry.rank >= top.rank) top = entry;
   // The browser trims and collapses whitespace in document.title; match it, or the
   // comparison below never holds and the head observer loops forever.
-  const title = (top?.title ?? APP_NAME).replace(/[\t\n\f\r ]+/g, ' ').trim();
+  const title = (top?.title ?? fallbackTitle).replace(/[\t\n\f\r ]+/g, ' ').trim();
   if (window.document.title !== title) window.document.title = title;
   // Next streams the metadata, and React can insert its <title> into the head after
   // a page has set its own; the browser shows the first one, so the title is set again.
@@ -45,7 +48,9 @@ export function titlePath(...parts: (string | false | null | undefined)[]): stri
 // Sets the browser tab title while the calling component is mounted. Null registers
 // nothing, which leaves the title of the layer below.
 export function useDocumentTitle(title: string | null, layer: TitleLayer = 'page') {
+  const { appName } = useBranding();
   useEffect(() => {
+    fallbackTitle = appName;
     if (!title) return;
     const entry = { title, rank: RANK[layer] };
     entries.add(entry);
@@ -54,5 +59,5 @@ export function useDocumentTitle(title: string | null, layer: TitleLayer = 'page
       entries.delete(entry);
       apply();
     };
-  }, [title, layer]);
+  }, [title, layer, appName]);
 }

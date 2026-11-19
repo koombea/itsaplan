@@ -1,13 +1,15 @@
 import type { MetadataRoute } from 'next';
+import { serverBranding } from '@/utils/branding';
 
 // Makes the app installable: Add to Dock in Safari, Install in Chrome and Edge,
 // Add to Home Screen on a phone. The colours are the light theme's `--background`;
 // the browser chrome follows the viewport `themeColor` in the root layout instead,
 // which also covers the dark theme.
-export default function manifest(): MetadataRoute.Manifest {
+export default async function manifest(): Promise<MetadataRoute.Manifest> {
+  const { appName } = await serverBranding();
   return {
-    name: "It's a Plan",
-    short_name: "It's a Plan",
+    name: appName,
+    short_name: appName,
     start_url: '/',
     scope: '/',
     display: 'standalone',

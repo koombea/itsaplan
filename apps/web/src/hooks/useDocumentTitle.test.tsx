@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { JSDOM } from 'jsdom';
+import { BrandingProvider } from '@/context/brandingContext';
 import { APP_NAME } from '@/utils/app';
+import { DEFAULT_BRANDING } from '@/utils/branding';
 import { titlePath, useDocumentTitle } from './useDocumentTitle';
 
 const replacedGlobals = ['window', 'document', 'IS_REACT_ACT_ENVIRONMENT'];
@@ -75,6 +77,24 @@ describe('useDocumentTitle', () => {
 
     await render(null);
     assert.equal(document.title, APP_NAME);
+  });
+
+  it('falls back to the name the instance is branded with', async () => {
+    await act(async () =>
+      root.render(
+        <BrandingProvider branding={{ ...DEFAULT_BRANDING, appName: 'Acme Tracker' }}>
+          <Section section="Acme › Inbox" />
+        </BrandingProvider>,
+      ),
+    );
+    await act(async () =>
+      root.render(
+        <BrandingProvider branding={{ ...DEFAULT_BRANDING, appName: 'Acme Tracker' }}>
+          <Section section={null} />
+        </BrandingProvider>,
+      ),
+    );
+    assert.equal(document.title, 'Acme Tracker');
   });
 
   it('keeps its title when a <title> is inserted into the head later', async () => {
