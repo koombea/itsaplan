@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { auth, setAuthSettings, setEmailSettings } from '@repo/auth';
+import { setSetting } from '@repo/db';
 import { authedApi } from '#tests/helpers/app';
 import { signUpTestUser } from '#tests/helpers/auth';
 import { resetDb } from '#tests/helpers/db';
@@ -59,6 +60,14 @@ describe('the language of an authentication email', () => {
     await post('/sign-in/magic-link', { email: 'new@example.test' }, 'ru-RU,en;q=0.5');
 
     expect(await nextSubject()).toBe('Ссылка для входа');
+  });
+
+  it('is the instance default for a browser asking for a language the app does not ship', async () => {
+    await setSetting('branding', { defaultLocale: 'es-ES' });
+
+    await post('/sign-in/magic-link', { email: 'new@example.test' }, 'de-DE');
+
+    expect(await nextSubject()).toBe('Tu enlace de inicio de sesión');
   });
 
   it('is English with neither', async () => {

@@ -93,6 +93,36 @@ describe('whats-new', () => {
     expect(stored.data?.locale).toBe('ru');
   });
 
+  // The instance's own default language decides what a browser asking for none the app
+  // ships gets, here as on every other path that stores a first language.
+  it('stores the instance default for a browser language the app does not ship', async () => {
+    await setSetting('branding', { defaultLocale: 'es-ES' });
+    const { user } = await signUpBeforeTheScreen();
+
+    await authedApi(user.cookie, { 'accept-language': 'de-DE' }).settings['whats-new'].seen.post();
+
+    const stored = await authedApi(user.cookie, {
+      'accept-language': 'fr',
+    }).account.preferences.get();
+    expect(stored.data?.locale).toBe('es-ES');
+  });
+
+  it('stores the instance default for a browser that signed up in a language the app does not ship', async () => {
+    await setSetting('branding', { defaultLocale: 'es-ES' });
+    const res = await auth.api.signUpEmail({
+      body: { email: 'de@example.com', password: 'test-password-123', name: 'De' },
+      headers: new Headers({ 'accept-language': 'de-DE' }),
+      asResponse: true,
+    });
+    const cookie = res.headers
+      .getSetCookie()
+      .map((c) => c.split(';')[0])
+      .join('; ');
+
+    const stored = await authedApi(cookie, { 'accept-language': 'fr' }).account.preferences.get();
+    expect(stored.data?.locale).toBe('es-ES');
+  });
+
   it('carries the running release, from the changelog when the feed is unreachable', async () => {
     const { api } = await signUpBeforeTheScreen();
 

@@ -14,7 +14,7 @@ import {
   type Locale,
   type RenderedEmail,
 } from '@repo/mailer';
-import { db, getInstanceEmailConfig, user, userPreference } from '@repo/db';
+import { db, getInstanceEmailConfig, getSetting, user, userPreference } from '@repo/db';
 import { eq, inArray } from 'drizzle-orm';
 import { getEmailTemplateSettings } from './instance';
 import { trustedOrigins } from './origins';
@@ -79,11 +79,24 @@ export async function savedLocaleOf(email: string): Promise<Locale | null> {
   return isLocale(row?.locale) ? row.locale : null;
 }
 
+// The language set with the instance branding in god mode (app_setting 'branding', written
+// by the api's settings module). It is what a browser asking for no shipped language gets.
+export async function instanceDefaultLocale(): Promise<Locale | undefined> {
+  const branding = await getSetting<{ defaultLocale?: string }>('branding');
+  return isLocale(branding?.defaultLocale) ? branding.defaultLocale : undefined;
+}
+
 // The language an address chose, or the language of the browser asking when it has none yet:
 // someone signing up or an address with no account.
 export async function emailLocale(email: string, request?: Request): Promise<Locale> {
   const saved = await savedLocaleOf(email);
-  return saved ?? localeFromAcceptLanguage(request?.headers.get('accept-language') ?? null);
+  return (
+    saved ??
+    localeFromAcceptLanguage(
+      request?.headers.get('accept-language') ?? null,
+      await instanceDefaultLocale(),
+    )
+  );
 }
 
 // Authentication email: password reset, address verification, magic link. It uses

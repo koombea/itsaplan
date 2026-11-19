@@ -35,7 +35,7 @@ import {
   isOidcUsable,
   isAccountDeactivated,
 } from './instance';
-import { emailLocale, sendAuthEmail } from './mail';
+import { emailLocale, instanceDefaultLocale, sendAuthEmail } from './mail';
 import { readAuthExtensions } from './extensions';
 import { trustedOrigins } from './origins';
 
@@ -550,14 +550,17 @@ async function freeTeamSlug(executor: DbExecutor, local: string): Promise<string
 }
 
 // A new account has already seen the release it signed up on, so the "what's new" screen
-// waits for the next upgrade. The language is the browser's, which the preferences
-// take by default anyway.
+// waits for the next upgrade. The language is the browser's, or the instance default when
+// it asks for none the app ships, which is what the preferences take by default anyway.
 async function startOnRunningRelease(userId: string, headers?: Headers): Promise<void> {
   await db
     .insert(schema.userPreference)
     .values({
       userId,
-      locale: localeFromAcceptLanguage(headers?.get('accept-language') ?? null),
+      locale: localeFromAcceptLanguage(
+        headers?.get('accept-language') ?? null,
+        await instanceDefaultLocale(),
+      ),
       seenVersion: rootPackage.version,
     })
     .onConflictDoNothing();

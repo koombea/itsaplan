@@ -5,7 +5,7 @@ import { errors } from '#shared/responses';
 import { getStorageSettings } from '@repo/db';
 import { getAuthSettings } from '@repo/auth';
 import { localeFromAcceptLanguage } from '@repo/mailer';
-import { apiDocsVisible, getHotkeySettings } from './service';
+import { apiDocsVisible, getBranding, getHotkeySettings } from './service';
 import { getAppVersion } from './updates';
 import { getWhatsNew, markWhatsNewSeen } from './whats-new';
 import {
@@ -101,7 +101,10 @@ export const settingsRoutes = new Elysia({
     async ({ user, request }) => {
       await markWhatsNewSeen(
         requireUser(user).id,
-        localeFromAcceptLanguage(request.headers.get('accept-language')),
+        localeFromAcceptLanguage(
+          request.headers.get('accept-language'),
+          (await getBranding()).defaultLocale,
+        ),
       );
       return { version: getAppVersion() };
     },
