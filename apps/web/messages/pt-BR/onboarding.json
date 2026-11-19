@@ -1,5 +1,5 @@
 {
-  "label": "Boas-vindas ao It's a Plan",
+  "label": "Boas-vindas ao {appName}",
   "goTo": "Ir para o slide {number}",
   "next": "Próximo",
   "start": "Começar",

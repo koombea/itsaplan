@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 import { X } from 'lucide-react';
 import { proEdition } from '@/cloud';
 import { Dialog, DialogClose, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { useBranding } from '@/context/brandingContext';
 import { flyToMark } from '../utils/flyToMark';
 import { ONBOARDING_SLIDES as slides } from '../utils/slides';
 import OnboardingFooter from './OnboardingFooter';
@@ -15,6 +16,7 @@ import OnboardingSlide from './OnboardingSlide';
 export default function OnboardingDialog({ onClose }: { onClose: () => void }) {
   const t = useTranslations('onboarding');
   const tCommon = useTranslations('common');
+  const { appName } = useBranding();
   const trackRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const closing = useRef(false);
@@ -47,7 +49,7 @@ export default function OnboardingDialog({ onClose }: { onClose: () => void }) {
         aria-describedby={undefined}
         className="gap-0 overflow-hidden p-0 sm:max-w-[640px]"
       >
-        <DialogTitle className="sr-only">{t('label')}</DialogTitle>
+        <DialogTitle className="sr-only">{t('label', { appName })}</DialogTitle>
         <div
           ref={trackRef}
           onScroll={onScroll}

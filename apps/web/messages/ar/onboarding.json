@@ -1,5 +1,5 @@
 {
-  "label": "مرحبًا بك في It's a Plan",
+  "label": "مرحبًا بك في {appName}",
   "goTo": "الانتقال إلى الشريحة {number}",
   "next": "التالي",
   "start": "ابدأ",

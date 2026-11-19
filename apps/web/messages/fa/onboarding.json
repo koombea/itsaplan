@@ -1,5 +1,5 @@
 {
-  "label": "به It's a Plan خوش آمدید",
+  "label": "به {appName} خوش آمدید",
   "goTo": "رفتن به اسلاید {number}",
   "next": "بعدی",
   "start": "شروع کنید",

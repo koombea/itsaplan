@@ -1,5 +1,5 @@
 {
-  "label": "It's a Plan'a hoş geldiniz",
+  "label": "{appName}'a hoş geldiniz",
   "goTo": "{number}. slayta git",
   "next": "İleri",
   "start": "Başlayın",
