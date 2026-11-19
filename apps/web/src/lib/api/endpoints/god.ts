@@ -2,7 +2,7 @@ import { request } from '@/lib/api/core/client';
 import type { MemberRole } from '@/lib/api/endpoints/members';
 import type { TeamRole } from '@/lib/api/endpoints/teams';
 import type { NotificationEncryption } from '@/lib/api/endpoints/notificationSettings';
-import type { Permissions } from '@/lib/api/endpoints/roles';
+import type { Permissions, Role } from '@/lib/api/endpoints/roles';
 import type { ProjectDefaults } from '@/lib/api/endpoints/projects';
 import type {
   BrandingSettings,
@@ -24,6 +24,17 @@ export interface InstanceAuthSettings {
   magicLink: boolean;
   emailPassword: boolean;
   trustProviderEmails: boolean;
+  personalWorkspaces: boolean;
+  // Days an invite link stays valid; 0 means invites never expire.
+  inviteTtlDays: number;
+  inviteSearch: boolean;
+  // The domains a new account's address must be at; empty admits any address.
+  allowedEmailDomains: string[];
+  // Requests one client address may send: sign-in per 10 seconds, account emails and
+  // sign-in links per minute.
+  signInRateLimit: number;
+  emailRateLimit: number;
+  magicLinkRateLimit: number;
   hasEmailProvider: boolean;
   // Whether Google or the OIDC provider can run. Password sign-in may only be turned
   // off while one of them can.
@@ -36,7 +47,18 @@ export interface InstanceAuthSettingsPatch {
   magicLink?: boolean;
   emailPassword?: boolean;
   trustProviderEmails?: boolean;
+  personalWorkspaces?: boolean;
+  inviteTtlDays?: number;
+  inviteSearch?: boolean;
+  allowedEmailDomains?: string[];
+  signInRateLimit?: number;
+  emailRateLimit?: number;
+  magicLinkRateLimit?: number;
 }
+
+// 'microsoft365' signs in to smtp.office365.com as an app registration (OAuth) instead
+// of with the mailbox password, which Microsoft refuses once the mailbox has MFA.
+export type SmtpAuth = 'password' | 'microsoft365';
 
 // The instance mail provider used for authentication email (password reset, address
 // verification, magic links). Separate from a team's notification provider.
@@ -50,6 +72,8 @@ export interface InstanceEmailSettings {
     username: string;
     hasPassword: boolean;
     timeout: number | null;
+    auth: SmtpAuth;
+    oauth: { tenantId: string; clientId: string; hasClientSecret: boolean };
   };
   resend: { enabled: boolean; hasApiKey: boolean };
   from: string;
@@ -66,6 +90,8 @@ export interface InstanceEmailSettingsPatch {
     username: string;
     password?: string;
     timeout: number | null;
+    auth?: SmtpAuth;
+    oauth?: { tenantId: string; clientId: string; clientSecret?: string };
   };
   resend?: { enabled: boolean; apiKey?: string };
   from?: string;
@@ -142,6 +168,9 @@ export interface InstanceUser {
   isAgent: boolean;
   providers: string[];
   projectCount: number;
+  active: boolean;
+  // Why god cannot switch `active`, or null when it can.
+  activeLock: 'owner' | 'agent' | 'scim' | null;
   lastSeenAt: string | null;
   createdAt: string;
 }
@@ -157,8 +186,11 @@ export interface InstanceUserProject {
   roleName: string | null;
   permissions: Permissions;
   // How many owners the project has. 1 on a project this user owns means deleting
-  // the account would leave the project with nobody who can manage it.
+  // the account would leave the project with nobody who can manage it, unless it is in a
+  // workspace of theirs.
   ownerCount: number;
+  // In a workspace this user owns: it passes to the instance owner with the account.
+  inOwnWorkspace: boolean;
   joinedAt: string;
 }
 
@@ -211,16 +243,6 @@ export interface InstanceProjectMember {
 
 export interface InstanceProjectDetail extends InstanceProject {
   members: InstanceProjectMember[];
-  // The custom roles a member of this project can be put on, for the SCIM group
-  // mapping form.
-  roles: { id: number; name: string; isDefault: boolean }[];
-}
-
-// One instance project as a picker entry: what the SCIM mapping form needs to name it.
-export interface InstanceProjectOption {
-  id: number;
-  key: string;
-  name: string;
 }
 
 // Instance administration (god mode). Every route below is owner-only; a plain
@@ -245,6 +267,73 @@ export const testInstanceEmailSettings = (patch: InstanceEmailSettingsPatch) =>
   request<InstanceEmailTestResult>('/god/email-settings/test', {
     method: 'POST',
     body: JSON.stringify(patch),
+  });
+
+export interface EmailText {
+  subject: string;
+  body: string;
+  button: string;
+}
+
+export interface EmailLayout {
+  html: string;
+  css: string;
+}
+
+export interface EmailTemplateEntry {
+  key: string;
+  group: string;
+  variables: string[];
+  hasLink: boolean;
+  defaults: Record<string, EmailText>;
+  edits: Record<string, EmailText>;
+}
+
+export interface EmailTemplatesSettings {
+  templates: EmailTemplateEntry[];
+  layout: EmailLayout;
+  defaultLayout: EmailLayout;
+  placeholders: { name: string; required: boolean }[];
+  canSend: boolean;
+}
+
+export interface EmailTemplatesBody {
+  edits: Record<string, Record<string, EmailText>>;
+  layout: EmailLayout | null;
+}
+
+export interface EmailDraft {
+  key: string;
+  locale: string;
+  text: EmailText;
+  layout: EmailLayout;
+}
+
+export interface EmailPreview {
+  subject: string;
+  text: string;
+  html: string;
+  from: string | null;
+}
+
+export const getEmailTemplates = () => request<EmailTemplatesSettings>('/god/email-templates');
+
+export const updateEmailTemplates = (body: EmailTemplatesBody) =>
+  request<EmailTemplatesSettings>('/god/email-templates', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+
+export const previewEmailDraft = (draft: EmailDraft) =>
+  request<EmailPreview>('/god/email-templates/preview', {
+    method: 'POST',
+    body: JSON.stringify(draft),
+  });
+
+export const testEmailDraft = (draft: EmailDraft) =>
+  request<InstanceEmailTestResult>('/god/email-templates/test', {
+    method: 'POST',
+    body: JSON.stringify(draft),
   });
 
 export const getInstanceTelegramSettings = () =>
@@ -272,6 +361,80 @@ export const updateInstanceProjectDefaults = (body: ProjectDefaults) =>
     body: JSON.stringify(body),
   });
 
+// What applies to every team's agents on this instance.
+export interface AgentSettings {
+  // Days a run trace is kept for. 0 keeps traces until they are deleted by hand.
+  traceRetentionDays: number;
+  // Seconds one agent run may take; an agent's own limit cannot exceed it.
+  maxRunSeconds: number;
+  // Runs of internal agents in flight at once across the instance. 0 sets no limit.
+  maxConcurrentRuns: number;
+  // Characters of an agent's answer that are saved. 0 sets no limit.
+  maxAnswerChars: number;
+}
+
+export const getInstanceAgentSettings = () => request<AgentSettings>('/god/agent-settings');
+
+export const updateInstanceAgentSettings = (body: Partial<AgentSettings>) =>
+  request<AgentSettings>('/god/agent-settings', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+
+// Whether public links work on this instance.
+export interface SharingSettings {
+  enabled: boolean;
+}
+
+export const getInstanceSharingSettings = () => request<SharingSettings>('/god/sharing-settings');
+
+export const updateInstanceSharingSettings = (body: SharingSettings) =>
+  request<SharingSettings>('/god/sharing-settings', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+
+// Who may read the API docs, in the app and at the api's /docs and /api/auth/reference.
+export type ApiDocsAudience = 'nobody' | 'god' | 'everyone';
+
+export interface ApiDocsSettings {
+  audience: ApiDocsAudience;
+}
+
+export const getInstanceApiDocsSettings = () => request<ApiDocsSettings>('/god/api-docs-settings');
+
+export const updateInstanceApiDocsSettings = (body: ApiDocsSettings) =>
+  request<ApiDocsSettings>('/god/api-docs-settings', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+
+export interface ApiKeySettings {
+  // 0 sets no limit.
+  requestsPerMinute: number;
+}
+
+export const getInstanceApiKeySettings = () => request<ApiKeySettings>('/god/api-key-settings');
+
+export const updateInstanceApiKeySettings = (body: ApiKeySettings) =>
+  request<ApiKeySettings>('/god/api-key-settings', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+
+// The sites that may show the shared work items and views, and the public pages, in a frame.
+export interface EmbedSites {
+  origins: string[];
+}
+
+export const getInstanceEmbedSites = () => request<EmbedSites>('/god/embed-sites');
+
+export const updateInstanceEmbedSites = (origins: string[]) =>
+  request<EmbedSites>('/god/embed-sites', {
+    method: 'PUT',
+    body: JSON.stringify({ origins }),
+  });
+
 export const getInstanceStorageSettings = () => request<StorageSettings>('/god/storage-settings');
 
 export const updateInstanceStorageSettings = (patch: StorageSettingsPatch) =>
@@ -285,6 +448,46 @@ export const getInstanceBrandingSettings = () =>
 
 export const updateInstanceBrandingSettings = (patch: BrandingSettingsPatch) =>
   request<BrandingSettings>('/god/branding-settings', {
+    method: 'PUT',
+    body: JSON.stringify(patch),
+  });
+
+// How the background jobs of the api, the worker and the bot run. Each job reads them on
+// its next pass, so a change applies without a restart.
+export interface JobSettings {
+  webhooks: {
+    // Also paces notification deliveries: the worker sends both on one pass.
+    pollIntervalMs: number;
+    batchSize: number;
+    timeoutMs: number;
+    maxAttempts: number;
+    disableThreshold: number;
+    leaseSeconds: number;
+    retentionDays: number;
+    cleanupIntervalMinutes: number;
+  };
+  notifications: { batchSize: number; maxAttempts: number; leaseSeconds: number };
+  imports: { pollIntervalMs: number };
+  agentRuns: { pollIntervalMs: number; maxAttempts: number; leaseSeconds: number };
+  agentChat: {
+    leaseSeconds: number;
+    maxAttempts: number;
+    claimWaitMs: number;
+    claimPollMs: number;
+    streamPollMs: number;
+    historyMessages: number;
+  };
+  agentInvocations: { pollIntervalMs: number; timeoutMs: number };
+  sweeps: { autoArchiveMinutes: number; tracePruneMinutes: number; shareExpiryMinutes: number };
+  bot: { configPollIntervalMs: number };
+}
+
+export type JobSettingsPatch = { [G in keyof JobSettings]?: Partial<JobSettings[G]> };
+
+export const getInstanceJobSettings = () => request<JobSettings>('/god/job-settings');
+
+export const updateInstanceJobSettings = (patch: JobSettingsPatch) =>
+  request<JobSettings>('/god/job-settings', {
     method: 'PUT',
     body: JSON.stringify(patch),
   });
@@ -318,6 +521,11 @@ export const listInstanceUsers = (
 export const getInstanceUser = (userId: string) =>
   request<InstanceUserDetail>(`/god/users/${userId}`);
 
+export const setInstanceUserActive = (userId: string, active: boolean) =>
+  request<InstanceUserDetail>(`/god/users/${userId}/${active ? 'reactivate' : 'deactivate'}`, {
+    method: 'POST',
+  });
+
 export const verifyInstanceUserEmail = (userId: string) =>
   request<InstanceUserDetail>(`/god/users/${userId}/verify-email`, { method: 'POST' });
 
@@ -332,10 +540,6 @@ export const deleteInstanceUser = (userId: string, withProjects: boolean) =>
 // members. Search and paging run on the server.
 export const listInstanceProjects = (params: PageParams & { search?: string }) =>
   request<Page<InstanceProject>>(`/god/projects${pageQuery(params, { search: params.search })}`);
-
-// Every project, for the SCIM mapping picker; the directory above is paged.
-export const listInstanceProjectOptions = () =>
-  request<InstanceProjectOption[]>('/god/projects/options');
 
 export const getInstanceProject = (projectId: number) =>
   request<InstanceProjectDetail>(`/god/projects/${projectId}`);
@@ -399,3 +603,17 @@ export const listInstanceTeamMembers = (teamId: number, params: PageParams & { s
   request<Page<InstanceTeamMember>>(
     `/god/teams/${teamId}/members${pageQuery(params, { search: params.search })}`,
   );
+
+// System roles: permission matrices that belong to no team, written only in god mode.
+export const listSystemRoles = () => request<Role[]>('/god/roles');
+
+export const createSystemRole = (input: { name: string; permissions: Permissions }) =>
+  request<Role>('/god/roles', { method: 'POST', body: JSON.stringify(input) });
+
+export const updateSystemRole = (
+  roleId: number,
+  patch: { name?: string; permissions?: Permissions },
+) => request<Role>(`/god/roles/${roleId}`, { method: 'PATCH', body: JSON.stringify(patch) });
+
+export const deleteSystemRole = (roleId: number) =>
+  request<void>(`/god/roles/${roleId}`, { method: 'DELETE' });

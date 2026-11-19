@@ -1,0 +1,59 @@
+{
+  "title": "MCP 伺服器",
+  "description": "透過 Model Context Protocol 將 AI 代理連線到本專案。代理能看到的範圍由所用 API 金鑰決定。",
+  "disabled": "已停用",
+  "offForTeam": "團隊 {team} 的 MCP 已關閉。",
+  "offForProject": "團隊 {team} 已開啟 MCP，但本專案未開啟。",
+  "openTeamSettings": "開啟團隊的 MCP 設定",
+  "askManager": "請團隊所有者或管理者開啟：",
+  "keyHint": "在 <link>API 金鑰</link>頁面建立金鑰，然後替換程式碼片段中的 <code>{apiKey}</code>。",
+  "endpoint": "MCP 端點",
+  "clientTabsAria": "用戶端",
+  "addToFile": "新增到 <code>{file}</code>",
+  "notes": {
+    "claudeCode": "在終端中執行此命令。",
+    "vscode": "需要 GitHub Copilot。",
+    "claudeDesktop": "Claude Desktop 透過 mcp-remote 橋接器連線遠端伺服器。需要 Node.js。",
+    "other": "任何支援基於 Streamable HTTP 的 MCP 用戶端都可以使用。將用戶端指向此端點。傳送 Authorization: Bearer {apiKey} 請求標頭。"
+  },
+  "clients": {
+    "other": "其他"
+  },
+  "oauth": {
+    "configuration": "如何連線",
+    "methodTabsAria": "連線方式",
+    "method": "OAuth",
+    "personalKey": "API 金鑰",
+    "description": "適用於任何支援 OAuth 的 MCP 用戶端，例如 ChatGPT 或 Claude。你使用 {app} 帳號登入。用戶端不會收到 API 金鑰。",
+    "discovery": "OAuth 發現",
+    "steps": {
+      "add": "在用戶端中新增 MCP 應用程式。",
+      "paste": "貼上 MCP 端點。",
+      "choose": "當用戶端詢問登入方式時選擇 OAuth。",
+      "signIn": "登入 {app} 並批准存取。"
+    },
+    "security": "OAuth 使用 PKCE (S256)、動態用戶端註冊以及限定到你的 {app} 帳號的存取權杖。",
+    "consent": {
+      "title": "允許 {client} 存取你的帳號？",
+      "titleUnnamed": "允許一個未命名的應用程式存取你的帳號？",
+      "actsAs": "允許後，該應用程式會以你的身分操作：",
+      "canSee": "檢視你在所有團隊中能看到的一切",
+      "canChange": "建立、修改和刪除你有權操作的任何內容",
+      "keepsAccess": "保有存取權，直到你在「帳號 › 安全」中斷開連線",
+      "account": "帳號",
+      "app": "應用程式",
+      "thisComputer": "在這台電腦上",
+      "named": "「{client}」是該應用程式自己設定的名稱。只有在你親自發起此連線時才允許。",
+      "unnamed": "該應用程式沒有提供名稱。只有在你親自發起此連線時才允許。",
+      "deny": "不允許",
+      "allow": "允許",
+      "allowing": "正在允許…",
+      "denying": "正在傳送…",
+      "expired": "此請求已在 10 分鐘後過期。請在應用程式中重新發起連線。",
+      "failed": "你的回覆未能送達。請再試一次。",
+      "incompleteTitle": "此連結不完整",
+      "incompleteBody": "請在應用程式中重新發起連線。",
+      "brandSubtitle": "將 Claude、ChatGPT 等 AI 應用程式連接到你的帳號。"
+    }
+  }
+}

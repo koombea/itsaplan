@@ -35,15 +35,20 @@ import {
   updateGitSettings,
   regenerateGitSecret,
   listGitProviderConnections,
-  connectGitProvider,
-  disconnectGitProvider,
   listAvailableGitRepositories,
   connectGitRepositories,
   disconnectGitRepository,
 } from '@/lib/api/endpoints/git';
 import {
   type CreateImportJobInput,
+  type ImportJob,
+  type LinearConnectionInput,
   type PlaneConnectionInput,
+  testLinearConnection,
+  testLinearStatesPreview,
+  type TrelloConnectionInput,
+  testTrelloConnection,
+  previewTrelloBoard,
   testPlaneConnection,
   testPlaneStatesPreview,
   createImportJob,
@@ -239,23 +244,6 @@ export function useGitProviderConnectionsQuery(projectKey: string) {
   });
 }
 
-export function useConnectGitProvider(projectKey: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: Parameters<typeof connectGitProvider>[1]) =>
-      connectGitProvider(projectKey, input),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.gitConnections(projectKey) }),
-  });
-}
-
-export function useDisconnectGitProvider(projectKey: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (connectionId: number) => disconnectGitProvider(projectKey, connectionId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.gitConnections(projectKey) }),
-  });
-}
-
 export function useAvailableGitRepositoriesQuery(
   projectKey: string,
   connectionId: number,
@@ -290,8 +278,9 @@ export function useDisconnectGitRepository(projectKey: string, connectionId: num
   });
 }
 
-// Import/export section: testing a connection to a source Plane instance,
-// starting an import job, and tracking the ones already running.
+// Import/export section: testing a connection to a source Plane instance, a Linear
+// API key or a Trello key and token, starting an import job, and tracking the ones
+// already running.
 export function useTestPlaneConnection(projectKey: string) {
   return useMutation({
     mutationFn: (input: PlaneConnectionInput) => testPlaneConnection(projectKey, input),
@@ -312,6 +301,42 @@ export function useTestPlaneStatesPreview(
   });
 }
 
+export function useTestLinearConnection(projectKey: string) {
+  return useMutation({
+    mutationFn: (input: LinearConnectionInput) => testLinearConnection(projectKey, input),
+  });
+}
+
+// Fetched automatically once a Linear team is picked, in the mapping review step.
+export function useTestLinearStatesPreview(
+  projectKey: string,
+  input: (LinearConnectionInput & { teamId: string }) | null,
+) {
+  return useQuery({
+    queryKey: qk.linearPreview(projectKey, input?.teamId ?? 'none'),
+    queryFn: () => testLinearStatesPreview(projectKey, input!),
+    enabled: input != null,
+  });
+}
+
+export function useTestTrelloConnection(projectKey: string) {
+  return useMutation({
+    mutationFn: (input: TrelloConnectionInput) => testTrelloConnection(projectKey, input),
+  });
+}
+
+// Fetched automatically once a Trello board is picked, in the mapping review step.
+export function useTrelloBoardPreview(
+  projectKey: string,
+  input: (TrelloConnectionInput & { boardId: string }) | null,
+) {
+  return useQuery({
+    queryKey: qk.trelloPreview(projectKey, input?.boardId ?? 'none'),
+    queryFn: () => previewTrelloBoard(projectKey, input!),
+    enabled: input != null,
+  });
+}
+
 export function useCreateImportJob(projectKey: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -323,9 +348,22 @@ export function useCreateImportJob(projectKey: string) {
 // Polled while a job is still pending or running, the same shape as
 // useAgentScheduleRuns.
 export function useImportJobsQuery(projectKey: string) {
+  const qc = useQueryClient();
   return useQuery({
     queryKey: qk.importJobs(projectKey),
-    queryFn: () => listImportJobs(projectKey),
+    queryFn: async () => {
+      const before = qc.getQueryData<ImportJob[]>(qk.importJobs(projectKey));
+      const jobs = await listImportJobs(projectKey);
+      // A job that finished since the last poll changed the project: its issues, and settings
+      // it turned on, such as estimates and time logging.
+      const finished = jobs.some(
+        (job) =>
+          job.status === 'completed' &&
+          before?.some((was) => was.id === job.id && was.status !== 'completed'),
+      );
+      if (finished) void qc.invalidateQueries({ queryKey: qk.project(projectKey) });
+      return jobs;
+    },
     refetchInterval: (query) =>
       query.state.data?.some((job) => job.status === 'running' || job.status === 'pending')
         ? 2000

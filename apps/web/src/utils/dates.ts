@@ -19,6 +19,21 @@ export function getDisplayLocale(): string {
   return displayLocale;
 }
 
+export function getIntlLocale(): string {
+  return displayLocale === 'fa' ? 'fa-IR-u-ca-persian' : displayLocale;
+}
+
+// The display language's calendar, as an Intl `calendar` option.
+export function calendarSystem(): 'persian' | 'gregory' {
+  return displayLocale === 'fa' ? 'persian' : 'gregory';
+}
+
+// The display language's first day of the week, as a `Date.getDay()` number. The
+// Iranian week starts on Saturday.
+export function localeWeekStart(): 6 | 1 {
+  return calendarSystem() === 'persian' ? 6 : 1;
+}
+
 // The zone timestamps are rendered in, from the user's account preferences. The API
 // stores and returns UTC; only the display side applies a zone. Held in a module
 // variable so the formatters stay plain functions callable outside React, and set
@@ -64,7 +79,7 @@ export function formatShortDate(value: string): string {
   const dateOnly = value.length <= 10;
   const date = new Date(dateOnly ? `${value}T00:00:00` : value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString(displayLocale, {
+  return date.toLocaleDateString(getIntlLocale(), {
     month: 'short',
     day: 'numeric',
     ...(dateOnly ? {} : zoneOption()),
@@ -77,7 +92,7 @@ export function formatDate(value: string): string {
   const dateOnly = value.length <= 10;
   const date = new Date(dateOnly ? `${value}T00:00:00` : value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString(displayLocale, {
+  return date.toLocaleDateString(getIntlLocale(), {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
@@ -98,19 +113,19 @@ export function formatDateTime(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   const thisYear = zonedYear(date) === zonedYear(new Date());
-  return date.toLocaleString(displayLocale, {
+  return date.toLocaleString(getIntlLocale(), {
     month: 'short',
     day: 'numeric',
     ...(thisYear ? {} : { year: 'numeric' }),
     hour: '2-digit',
     minute: '2-digit',
-    hour12: false,
+    hour12: displayLocale === 'ko',
     ...zoneOption(),
   });
 }
 
 // The display zone's offset at a given moment, in ms (zone time minus UTC).
-function zoneOffsetMs(date: Date): number {
+export function zoneOffsetMs(date: Date): number {
   const parts = new Intl.DateTimeFormat('en-US', {
     hourCycle: 'h23',
     year: 'numeric',
@@ -153,18 +168,28 @@ export function fromZonedParts(day: string, time: string): string {
 
 // "Jul 2, 14:05 – 16:30" for a range, rendered in the user's zone; the day is
 // repeated on the end when it falls on another one. Without an end it is a
-// single moment.
+// single moment. A same-day end is only the time, on the same clock as the start,
+// so a Korean range reads "오후 11:36 – 오후 11:46" rather than a picker "HH:mm".
 export function formatDateTimeRange(start: string, end: string | null): string {
   if (!end) return formatDateTime(start);
   if (dayKey(start) !== dayKey(end)) return `${formatDateTime(start)} – ${formatDateTime(end)}`;
-  return `${formatDateTime(start)} – ${toZonedParts(end)?.time ?? end}`;
+  const endDate = new Date(end);
+  const endTime = Number.isNaN(endDate.getTime())
+    ? end
+    : endDate.toLocaleTimeString(getIntlLocale(), {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: displayLocale === 'ko',
+        ...zoneOption(),
+      });
+  return `${formatDateTime(start)} – ${endTime}`;
 }
 
 // "July 2, 2026" for a moment in time, rendered in the user's zone.
 export function formatLongDate(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString(displayLocale, {
+  return date.toLocaleDateString(getIntlLocale(), {
     month: 'long',
     day: 'numeric',
     year: 'numeric',
@@ -172,13 +197,14 @@ export function formatLongDate(value: string): string {
   });
 }
 
-// "2:05 PM" for a moment in time, rendered in the user's zone.
-export function formatTime(value: string): string {
+// "2:05 PM" for a moment in time, rendered in the user's zone; "2:05:09 PM" with seconds.
+export function formatTime(value: string, { seconds = false } = {}): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleTimeString(displayLocale, {
+  return date.toLocaleTimeString(getIntlLocale(), {
     hour: 'numeric',
     minute: '2-digit',
+    ...(seconds && { second: '2-digit' }),
     ...zoneOption(),
   });
 }
@@ -186,7 +212,7 @@ export function formatTime(value: string): string {
 // "July 2026" for a calendar date the caller already built in local time (the
 // timeline's month band), so no zone is applied.
 export function formatMonthYear(date: Date): string {
-  return date.toLocaleDateString(displayLocale, { month: 'long', year: 'numeric' });
+  return date.toLocaleDateString(getIntlLocale(), { month: 'long', year: 'numeric' });
 }
 
 // The calendar day a moment falls on in the user's zone, as "YYYY-MM-DD". Used to
@@ -263,4 +289,52 @@ export function addDays(date: Date, n: number): Date {
   const next = new Date(date);
   next.setDate(next.getDate() + n);
   return next;
+}
+
+const persianDate = new Intl.DateTimeFormat('en-u-ca-persian', {
+  month: 'numeric',
+  day: 'numeric',
+});
+const persianDayLabel = new Intl.DateTimeFormat('fa-IR-u-ca-persian', { day: 'numeric' });
+
+function persianMonthDay(date: Date): { month: number; day: number } {
+  const parts = persianDate.formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((p) => p.type === type)?.value);
+  return { month: part('month'), day: part('day') };
+}
+
+// The day of the month in the display calendar.
+export function dayOfMonth(date: Date): string {
+  return calendarSystem() === 'persian' ? persianDayLabel.format(date) : String(date.getDate());
+}
+
+function startOfPersianMonth(date: Date): Date {
+  const midnight = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  return addDays(midnight, 1 - persianMonthDay(date).day);
+}
+
+// Local midnight on 1 Farvardin of the solar Hijri year that holds `date`. The first
+// six months have 31 days, the next five 30.
+export function startOfPersianYear(date: Date): Date {
+  const { month, day } = persianMonthDay(date);
+  const daysBefore = month <= 6 ? (month - 1) * 31 : 186 + (month - 7) * 30;
+  const midnight = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  return addDays(midnight, 1 - day - daysBefore);
+}
+
+// Local midnight on day 1 of the month that holds `date`, in the display calendar.
+export function startOfCalendarMonth(date: Date): Date {
+  return calendarSystem() === 'persian'
+    ? startOfPersianMonth(date)
+    : new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+// Day 1 of the solar Hijri month `months` months after the one that holds `date`.
+// A month has 29 to 31 days, so 31 days after day 1 is always in the next month.
+export function addPersianMonths(date: Date, months: number): Date {
+  let cursor = startOfPersianMonth(date);
+  for (let i = 0; i < Math.abs(months); i++)
+    cursor = startOfPersianMonth(addDays(cursor, months > 0 ? 31 : -1));
+  return cursor;
 }

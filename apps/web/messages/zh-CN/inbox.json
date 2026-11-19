@@ -10,12 +10,14 @@
   "showSnoozed": "显示已稍后提醒的通知",
   "markAllRead": "全部标为已读",
   "deleteAllRead": "删除所有已读通知",
-  "deleteAllReadCompleted": "删除已完成工作项的所有已读通知",
+  "deleteAllCompleted": "删除已完成工作项的通知",
+  "deleteAllCompletedDescription": "这将删除符合当前筛选条件的已完成或已取消工作项的通知，包括未读通知。此操作无法撤销。",
   "types": {
     "assigned": "已指派",
     "mentioned": "已提及",
     "commented": "有新评论",
-    "state_changed": "状态已变更"
+    "state_changed": "状态已变更",
+    "reacted": "有新回应"
   },
   "actions": {
     "markRead": "标为已读",
@@ -32,6 +34,7 @@
     "mentioned": "{who} 提及了你",
     "commented": "{who} 发表了评论",
     "stateChanged": "{who} 将状态从 {from} 更改为 {to}",
-    "stateChangedPlain": "{who} 更改了状态"
+    "stateChangedPlain": "{who} 更改了状态",
+    "reacted": "{who} 用 {emoji} 回应了你的评论"
   }
 }

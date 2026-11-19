@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { ProjectDetail } from '@/lib/api/endpoints/projects';
 import type { Issue, IssuePatch } from '@/lib/api/endpoints/issues';
 import { addDays, toDateStr } from '@/utils/dates';
+import { inlineSign } from '@/utils/inlineSign';
 import { useUpdateIssue } from '@/services/issues.service';
 import { effSpan } from '../utils/timeline';
 
@@ -31,13 +32,14 @@ export function useTimelineDrag({
   dayW: number;
   onOpenIssue: (id: number) => void;
 }) {
-  const updateIssue = useUpdateIssue(project.project.key);
+  const updateIssue = useUpdateIssue(project.project.ref);
   const [preview, setPreview] = useState<{ issueId: number; start: Date; end: Date } | null>(null);
 
   function beginDrag(e: React.PointerEvent, issue: Issue, mode: TimelineDragMode) {
     e.preventDefault();
     e.stopPropagation();
     const span = effSpan(issue);
+    const sign = inlineSign(e.currentTarget);
     const session: DragSession = {
       startX: e.clientX,
       origStart: span.start,
@@ -48,7 +50,7 @@ export function useTimelineDrag({
     };
 
     const onMove = (ev: PointerEvent) => {
-      const deltaDays = Math.round((ev.clientX - session.startX) / dayW);
+      const deltaDays = Math.round((sign * (ev.clientX - session.startX)) / dayW);
       session.deltaDays = deltaDays;
       let start = session.origStart;
       let end = session.origEnd;

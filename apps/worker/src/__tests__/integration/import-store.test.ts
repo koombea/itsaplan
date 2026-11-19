@@ -3,10 +3,14 @@ import { randomUUID } from 'node:crypto';
 import {
   db,
   team,
+  workspace,
   project,
   projectColumn,
   issue,
   issueAttachment,
+  issueLink,
+  initiative,
+  initiativeAttachment,
   importJob,
   user,
   getStorageSettings,
@@ -15,14 +19,26 @@ import {
   type StorageSettings,
 } from '@repo/db';
 import { eq } from 'drizzle-orm';
+import { encryptSecret } from '@repo/crypto';
 import { getObject } from '@repo/storage';
+import { importSourceNames, readerForJob, sourceProjectKeyForJob } from '../../import-sources';
+import { tickErrorOutcome } from '../../import-retry';
+import { SourceRateLimitedError } from '../../reader';
+import { PlaneReader } from '../../plane-adapter';
 import {
   claimDueImportJobs,
+  decryptImportCredential,
   createLocalStateAndRecord,
   createLocalIssueAndRecord,
   createLocalAttachmentAndRecord,
+  importedAttachmentPaths,
+  createIssueLink,
   findImportRecord,
+  retryImportJobLater,
+  saveImportJobSourceProject,
   AttachmentRejectedError,
+  setIssueParentIfUnset,
+  type NewLocalIssue,
 } from '../../import-store';
 
 // Nothing here calls resetDb (the worker has no api to reset for), so every
@@ -30,7 +46,14 @@ import {
 // matching notification-send.test.ts's own convention.
 
 async function makeProject(): Promise<{ projectId: number; columnId: number; userId: string }> {
-  const [teamRow] = await db.insert(team).values({ name: 'Importers' }).returning({ id: team.id });
+  const [ws] = await db
+    .insert(workspace)
+    .values({ name: 'Importers' })
+    .returning({ id: workspace.id });
+  const [teamRow] = await db
+    .insert(team)
+    .values({ workspaceId: ws!.id, name: 'Importers' })
+    .returning({ id: team.id });
   const [projectRow] = await db
     .insert(project)
     .values({ teamId: teamRow!.id, key: randomUUID().slice(0, 8), name: 'Imported' })
@@ -60,6 +83,21 @@ async function makeIssue(projectId: number, columnId: number, title = 'Task'): P
   return row!.id;
 }
 
+function newIssue(projectId: number, columnId: number, title: string): NewLocalIssue {
+  return {
+    projectId,
+    columnId,
+    cycleId: null,
+    parentId: null,
+    assigneeUserId: null,
+    title,
+    description: '',
+    priority: null,
+    startDate: null,
+    dueDate: null,
+  };
+}
+
 describe('claimDueImportJobs', () => {
   it('claims a due pending job, bumps attempts, and clears a stale last_error', async () => {
     const { projectId, userId } = await makeProject();
@@ -73,7 +111,7 @@ describe('claimDueImportJobs', () => {
     // database from earlier runs of this same suite (nothing here truncates
     // import_job between runs), and claimDueImportJobs orders by next_attempt_at
     // with no per-test scope to filter on.
-    const claimed = await claimDueImportJobs(1000);
+    const claimed = await claimDueImportJobs(importSourceNames(), 1000);
     const job = claimed.find((j) => j.id === jobId);
 
     expect(job).toBeDefined();
@@ -81,6 +119,18 @@ describe('claimDueImportJobs', () => {
     const [row] = await db.select().from(importJob).where(eq(importJob.id, jobId));
     expect(row!.lastError).toBeNull();
     expect(row!.nextAttemptAt.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('leaves a job of a source this build does not read to a worker that reads it', async () => {
+    const { projectId, userId } = await makeProject();
+    const jobId = await makeImportJob(projectId, userId);
+    await db
+      .update(importJob)
+      .set({ source: 'elsewhere', nextAttemptAt: new Date(Date.now() - 1000) })
+      .where(eq(importJob.id, jobId));
+
+    expect((await claimDueImportJobs(['plane'], 1000)).some((j) => j.id === jobId)).toBe(false);
+    expect((await claimDueImportJobs(['elsewhere'], 1000)).some((j) => j.id === jobId)).toBe(true);
   });
 
   it('does not claim a job whose next attempt is still in the future', async () => {
@@ -91,7 +141,7 @@ describe('claimDueImportJobs', () => {
       .set({ nextAttemptAt: new Date(Date.now() + 60_000) })
       .where(eq(importJob.id, jobId));
 
-    const claimed = await claimDueImportJobs(50);
+    const claimed = await claimDueImportJobs(importSourceNames(), 50);
     expect(claimed.some((j) => j.id === jobId)).toBe(false);
   });
 
@@ -103,8 +153,156 @@ describe('claimDueImportJobs', () => {
       .set({ status: 'paused', nextAttemptAt: new Date(Date.now() - 1000) })
       .where(eq(importJob.id, jobId));
 
-    const claimed = await claimDueImportJobs(50);
+    const claimed = await claimDueImportJobs(importSourceNames(), 50);
     expect(claimed.some((j) => j.id === jobId)).toBe(false);
+  });
+});
+
+describe('import_job source', () => {
+  it('accepts a Linear job and claims it with its source', async () => {
+    const { projectId, userId } = await makeProject();
+    const [row] = await db
+      .insert(importJob)
+      .values({
+        projectId,
+        createdByUserId: userId,
+        source: 'linear',
+        config: { teamId: 'team-1', teamKey: 'ATO', projectFilter: 'none', projectId: null },
+        nextAttemptAt: new Date(Date.now() - 1000),
+      })
+      .returning({ id: importJob.id });
+
+    const job = (await claimDueImportJobs(importSourceNames(), 1000)).find((j) => j.id === row!.id);
+
+    expect(job?.source).toBe('linear');
+  });
+
+  it('stores a source the core has no adapter for, which a build can register', async () => {
+    const { projectId, userId } = await makeProject();
+    const [row] = await db
+      .insert(importJob)
+      .values({ projectId, createdByUserId: userId, source: 'jira', status: 'paused' })
+      .returning({ source: importJob.source });
+    expect(row!.source).toBe('jira');
+  });
+});
+
+async function claimJob(jobId: number): Promise<number> {
+  await db
+    .update(importJob)
+    .set({ nextAttemptAt: new Date(Date.now() - 1000) })
+    .where(eq(importJob.id, jobId));
+  const claimed = await claimDueImportJobs(importSourceNames(), 1000);
+  return claimed.find((j) => j.id === jobId)!.attempts;
+}
+
+async function attemptsOf(jobId: number): Promise<number> {
+  const [row] = await db.select().from(importJob).where(eq(importJob.id, jobId));
+  return row!.attempts;
+}
+
+describe('saveImportJobSourceProject', () => {
+  async function saved(name: string, url: string | null) {
+    const { projectId, userId } = await makeProject();
+    const jobId = await makeImportJob(projectId, userId);
+    await saveImportJobSourceProject(jobId, { name, url });
+    const [row] = await db.select().from(importJob).where(eq(importJob.id, jobId));
+    return { name: row!.sourceProjectName, url: row!.sourceProjectUrl };
+  }
+
+  it('keeps the name and an http(s) address', async () => {
+    expect(await saved('  Mobile App ', 'https://acme.atlassian.net/browse/MOB')).toEqual({
+      name: 'Mobile App',
+      url: 'https://acme.atlassian.net/browse/MOB',
+    });
+  });
+
+  it('drops an address the card could not link safely', async () => {
+    expect((await saved('Board', 'javascript:alert(1)')).url).toBeNull();
+    expect((await saved('Board', 'not a url')).url).toBeNull();
+  });
+
+  it('cuts a long name and stores none for a blank one', async () => {
+    expect((await saved('x'.repeat(500), null)).name).toHaveLength(200);
+    expect((await saved('   ', null)).name).toBeNull();
+  });
+});
+
+describe('retryImportJobLater', () => {
+  it('undoes the claim bump when the tick does not count as an attempt', async () => {
+    const { projectId, userId } = await makeProject();
+    const jobId = await makeImportJob(projectId, userId);
+
+    expect(await claimJob(jobId)).toBe(1);
+    await retryImportJobLater(jobId, 1000, 'rate limited', false);
+    expect(await attemptsOf(jobId)).toBe(0);
+
+    expect(await claimJob(jobId)).toBe(1);
+    await retryImportJobLater(jobId, 1000, 'HTTP 502', true);
+    expect(await attemptsOf(jobId)).toBe(1);
+  });
+
+  it('never takes attempts below zero', async () => {
+    const { projectId, userId } = await makeProject();
+    const jobId = await makeImportJob(projectId, userId);
+
+    await retryImportJobLater(jobId, 1000, 'rate limited', false);
+    expect(await attemptsOf(jobId)).toBe(0);
+  });
+
+  it('keeps a rate-limited run from exhausting the attempt limit', async () => {
+    const { projectId, userId } = await makeProject();
+    const jobId = await makeImportJob(projectId, userId);
+
+    for (let i = 0; i < 10; i++) {
+      const attempts = await claimJob(jobId);
+      const outcome = tickErrorOutcome(new SourceRateLimitedError(1000), attempts);
+      if (outcome.action !== 'retry') throw new Error('rate limit must retry');
+      await retryImportJobLater(jobId, outcome.delayMs, outcome.lastError, outcome.countsAsAttempt);
+    }
+    expect(await attemptsOf(jobId)).toBe(0);
+
+    const attempts = await claimJob(jobId);
+    expect(tickErrorOutcome(new Error('HTTP 502'), attempts).action).toBe('retry');
+  });
+});
+
+describe('decryptImportCredential', () => {
+  it('resumes a Plane job the api created, mid-phase, with the same reader and key', async () => {
+    const { projectId, userId } = await makeProject();
+    const credential = {
+      baseUrl: 'https://plane.example.test',
+      workspaceSlug: 'acme',
+      apiKey: 'plane-api-key',
+    };
+    const encrypted = encryptSecret(JSON.stringify(credential));
+    const [row] = await db
+      .insert(importJob)
+      .values({
+        projectId,
+        createdByUserId: userId,
+        source: 'plane',
+        phase: 'create',
+        config: {
+          planeProjectId: 'project-1',
+          planeProjectKey: 'ROOMS',
+          unmatchedUserPolicy: 'unassigned',
+        },
+        cursor: { lastRecordId: 41 },
+        credentialCiphertext: encrypted.ciphertext,
+        credentialIv: encrypted.iv,
+        credentialAuthTag: encrypted.authTag,
+        nextAttemptAt: new Date(Date.now() - 1000),
+      })
+      .returning({ id: importJob.id });
+
+    const job = (await claimDueImportJobs(importSourceNames(), 1000)).find((j) => j.id === row!.id);
+
+    expect(job).toMatchObject({ source: 'plane', phase: 'create', cursor: { lastRecordId: 41 } });
+    const decrypted = decryptImportCredential(job!);
+    expect(decrypted).toEqual(credential);
+    expect(readerForJob(job!, decrypted)).toBeInstanceOf(PlaneReader);
+    expect(sourceProjectKeyForJob(job!)).toBe('ROOMS');
   });
 });
 
@@ -142,6 +340,22 @@ describe('createLocalStateAndRecord', () => {
     expect(columnId).toBe(existing!.id);
     const [row] = await db.select().from(projectColumn).where(eq(projectColumn.id, columnId));
     expect(row?.stateType).toBe('completed');
+  });
+});
+
+describe('createIssueLink', () => {
+  it('drops the second insert of a pair that already exists', async () => {
+    const { projectId, columnId } = await makeProject();
+    const a = await makeIssue(projectId, columnId, 'A');
+    const b = await makeIssue(projectId, columnId, 'B');
+
+    // Linear returns a "related" relation from both issues, so Link sees the
+    // pair once from each side.
+    await createIssueLink(a, b, 'relates');
+    await createIssueLink(b, a, 'relates');
+
+    const rows = await db.select().from(issueLink).where(eq(issueLink.sourceIssueId, a));
+    expect(rows).toHaveLength(1);
   });
 });
 
@@ -191,6 +405,53 @@ describe('createLocalIssueAndRecord', () => {
     // The reused issue keeps its own content; the import does not overwrite it.
     expect(row?.description).toBe('');
   });
+
+  it("keeps the source's created and updated dates", async () => {
+    const { projectId, columnId, userId } = await makeProject();
+    const jobId = await makeImportJob(projectId, userId);
+
+    const issueId = await createLocalIssueAndRecord(jobId, 'plane-issue-3', 'ROOMS-3', {
+      ...newIssue(projectId, columnId, 'Old work'),
+      createdAt: '2024-03-01T09:30:00.000Z',
+      updatedAt: '2024-05-20T17:00:00.000Z',
+    });
+
+    const [row] = await db.select().from(issue).where(eq(issue.id, issueId));
+    expect(row?.createdAt.toISOString()).toBe('2024-03-01T09:30:00.000Z');
+    expect(row?.updatedAt.toISOString()).toBe('2024-05-20T17:00:00.000Z');
+  });
+
+  it('falls back to now for a missing or unparseable source date', async () => {
+    const { projectId, columnId, userId } = await makeProject();
+    const jobId = await makeImportJob(projectId, userId);
+    const before = Date.now() - 60_000;
+
+    const issueId = await createLocalIssueAndRecord(jobId, 'plane-issue-4', 'ROOMS-4', {
+      ...newIssue(projectId, columnId, 'Undated work'),
+      createdAt: 'not a date',
+    });
+
+    const [row] = await db.select().from(issue).where(eq(issue.id, issueId));
+    expect(row!.createdAt.getTime()).toBeGreaterThan(before);
+    expect(row!.updatedAt.getTime()).toBeGreaterThan(before);
+  });
+
+  it("leaves a reused issue's own dates alone", async () => {
+    const { projectId, columnId, userId } = await makeProject();
+    const existingId = await makeIssue(projectId, columnId, 'Shared title');
+    const [existing] = await db.select().from(issue).where(eq(issue.id, existingId));
+    const jobId = await makeImportJob(projectId, userId);
+
+    await createLocalIssueAndRecord(jobId, 'plane-issue-5', 'ROOMS-5', {
+      ...newIssue(projectId, columnId, 'Shared title'),
+      createdAt: '2020-01-01T00:00:00.000Z',
+      updatedAt: '2020-01-02T00:00:00.000Z',
+    });
+
+    const [row] = await db.select().from(issue).where(eq(issue.id, existingId));
+    expect(row?.createdAt).toEqual(existing!.createdAt);
+    expect(row?.updatedAt).toEqual(existing!.updatedAt);
+  });
 });
 
 describe('createLocalAttachmentAndRecord', () => {
@@ -232,6 +493,45 @@ describe('createLocalAttachmentAndRecord', () => {
     });
     const stored = await getObject(row!.s3Key);
     expect(await new Response(stored.body).text()).toBe('hello from plane');
+  });
+
+  it('stores a file on an initiative and gives each owner the paths of its files', async () => {
+    const { projectId, columnId, userId } = await makeProject();
+    const issueId = await makeIssue(projectId, columnId);
+    const jobId = await makeImportJob(projectId, userId);
+    const [owner] = await db
+      .insert(initiative)
+      .values({ projectId, title: 'Epic' })
+      .returning({ id: initiative.id });
+
+    const fileId = await createLocalAttachmentAndRecord(jobId, 'jira-attachment-1', {
+      projectId,
+      initiativeId: owner!.id,
+      filename: 'plan.txt',
+      contentType: 'text/plain',
+      bytes: Buffer.from('plan'),
+    });
+    await createLocalAttachmentAndRecord(jobId, 'jira-attachment-2', {
+      projectId,
+      issueId,
+      filename: 'shot.txt',
+      contentType: 'text/plain',
+      bytes: Buffer.from('shot'),
+    });
+
+    const [row] = await db
+      .select()
+      .from(initiativeAttachment)
+      .where(eq(initiativeAttachment.id, fileId));
+    expect(row!.initiativeId).toBe(owner!.id);
+    const stored = await getObject(row!.s3Key);
+    expect(await new Response(stored.body).text()).toBe('plan');
+    expect(await importedAttachmentPaths(jobId, { initiativeId: owner!.id })).toEqual(
+      new Map([['jira-attachment-1', `/media/initiative-attachments/${row!.publicId}/raw`]]),
+    );
+    expect([...(await importedAttachmentPaths(jobId, { issueId })).keys()]).toEqual([
+      'jira-attachment-2',
+    ]);
   });
 
   it('reuses an existing attachment on the same issue by filename instead of re-uploading', async () => {
@@ -388,5 +688,69 @@ describe('createLocalAttachmentAndRecord', () => {
       localId: rows[0]!.id,
     });
     expect(await findImportRecord(jobId, 'attachment', loserSourceId)).toBeNull();
+  });
+});
+
+// A chain of issues written the way an import writes them, each under the one
+// before: the first is on level 1, the last on level `levels`.
+async function makeChain(projectId: number, columnId: number, levels: number): Promise<number[]> {
+  const ids: number[] = [];
+  for (let level = 1; level <= levels; level++) {
+    const id = await makeIssue(projectId, columnId, `Level ${level}`);
+    if (ids.length)
+      await db
+        .update(issue)
+        .set({ parentId: ids.at(-1)! })
+        .where(eq(issue.id, id));
+    ids.push(id);
+  }
+  return ids;
+}
+
+async function parentOf(issueId: number): Promise<number | null> {
+  const [row] = await db
+    .select({ parentId: issue.parentId })
+    .from(issue)
+    .where(eq(issue.id, issueId));
+  return row!.parentId;
+}
+
+describe('imported parents', () => {
+  it('creates an issue under a parent on level 7 and without one under level 8', async () => {
+    const { projectId, columnId, userId } = await makeProject();
+    const jobId = await makeImportJob(projectId, userId);
+    const levels = await makeChain(projectId, columnId, 8);
+
+    const onEight = await createLocalIssueAndRecord(jobId, 'plane-deep-1', 'ROOMS-1', {
+      ...newIssue(projectId, columnId, 'Fits'),
+      parentId: levels[6]!,
+    });
+    const onNine = await createLocalIssueAndRecord(jobId, 'plane-deep-2', 'ROOMS-2', {
+      ...newIssue(projectId, columnId, 'Too deep'),
+      parentId: levels[7]!,
+    });
+
+    expect(await parentOf(onEight)).toBe(levels[6]!);
+    expect(await parentOf(onNine)).toBeNull();
+  });
+
+  it('links a parent only while the issue and its subtasks stay within level 8', async () => {
+    const { projectId, columnId } = await makeProject();
+    const levels = await makeChain(projectId, columnId, 7);
+    const [withSubtask] = await makeChain(projectId, columnId, 2);
+
+    await setIssueParentIfUnset(projectId, withSubtask!, levels[6]!);
+    expect(await parentOf(withSubtask!)).toBeNull();
+
+    await setIssueParentIfUnset(projectId, withSubtask!, levels[5]!);
+    expect(await parentOf(withSubtask!)).toBe(levels[5]!);
+  });
+
+  it('does not link an issue under one of its own subtasks', async () => {
+    const { projectId, columnId } = await makeProject();
+    const [top, , bottom] = await makeChain(projectId, columnId, 3);
+
+    await setIssueParentIfUnset(projectId, top!, bottom!);
+    expect(await parentOf(top!)).toBeNull();
   });
 });

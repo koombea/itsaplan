@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { apiKeyApi, authedApi, type Api } from '#tests/helpers/app';
+import { apiKeyApi, authedApi, type Api, createProject } from '#tests/helpers/app';
 import { signUpTestUser } from '#tests/helpers/auth';
 import { resetDb } from '#tests/helpers/db';
 import { createAgent, teamOf } from '#tests/helpers/agents';
@@ -12,7 +12,7 @@ import { createAgent, teamOf } from '#tests/helpers/agents';
 async function setup() {
   const owner = await signUpTestUser({ name: 'Owner' });
   const asOwner = authedApi(owner.cookie);
-  await asOwner.projects.post({ key: 'MKT', name: 'Marketing' });
+  await createProject(asOwner, { key: 'MKT', name: 'Marketing' });
   const view = await asOwner.projects({ projectKey: 'MKT' }).get();
   const columnId = view.data!.columns[0].id;
   const created = await createAgent(asOwner, 'MKT', {
@@ -133,6 +133,75 @@ describe('agent runner queue', () => {
       status: 'success',
       output: 'Opened PR #12',
     });
+  });
+
+  it('saves the start of an output up to the instance answer limit', async () => {
+    const { asOwner, asRunner, agent, columnId } = await setup();
+    await asOwner.god['agent-settings'].put({ maxAnswerChars: 5 });
+    await queueRun(asOwner, columnId, agent.username);
+    const run = (await asRunner['agent-runs'].claim.post()).data!.run!;
+
+    await asRunner['agent-runs']({ runId: run.id }).result.post({
+      status: 'success',
+      output: 'Opened PR #12',
+    });
+
+    const history = await asOwner
+      .teams({ teamId: await teamOf(asOwner, 'MKT') })
+      ['ai-agents']({ agentId: agent.id })
+      .runs.get({ query: {} });
+    expect(history.data!.items[0].output).toBe('Opene');
+  });
+
+  it('cuts an output at 200,000 characters by default', async () => {
+    const { asOwner, asRunner, agent, columnId } = await setup();
+    await queueRun(asOwner, columnId, agent.username);
+    const run = (await asRunner['agent-runs'].claim.post()).data!.run!;
+
+    await asRunner['agent-runs']({ runId: run.id }).result.post({
+      status: 'success',
+      output: 'x'.repeat(250_000),
+    });
+
+    const history = await asOwner
+      .teams({ teamId: await teamOf(asOwner, 'MKT') })
+      ['ai-agents']({ agentId: agent.id })
+      .runs.get({ query: {} });
+    expect(history.data!.items[0].output).toHaveLength(200_000);
+  });
+
+  it('counts an emoji as one character, so the cut keeps it whole', async () => {
+    const { asOwner, asRunner, agent, columnId } = await setup();
+    await asOwner.god['agent-settings'].put({ maxAnswerChars: 2 });
+    await queueRun(asOwner, columnId, agent.username);
+    const run = (await asRunner['agent-runs'].claim.post()).data!.run!;
+
+    await asRunner['agent-runs']({ runId: run.id }).result.post({
+      status: 'success',
+      output: 'a😀b',
+    });
+
+    const history = await asOwner
+      .teams({ teamId: await teamOf(asOwner, 'MKT') })
+      ['ai-agents']({ agentId: agent.id })
+      .runs.get({ query: {} });
+    expect(history.data!.items[0].output).toBe('a😀');
+  });
+
+  it('saves an output whole when the answer limit is 0', async () => {
+    const { asOwner, asRunner, agent, columnId } = await setup();
+    await asOwner.god['agent-settings'].put({ maxAnswerChars: 0 });
+    await queueRun(asOwner, columnId, agent.username);
+    const run = (await asRunner['agent-runs'].claim.post()).data!.run!;
+    const output = 'x'.repeat(250_000);
+
+    await asRunner['agent-runs']({ runId: run.id }).result.post({ status: 'success', output });
+
+    const history = await asOwner
+      .teams({ teamId: await teamOf(asOwner, 'MKT') })
+      ['ai-agents']({ agentId: agent.id })
+      .runs.get({ query: {} });
+    expect(history.data!.items[0].output).toBe(output);
   });
 
   it('records a failure with its error', async () => {

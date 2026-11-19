@@ -1,6 +1,7 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
+import { useBranding } from '@/context/brandingContext';
 import SettingsCard from '@/components/common/page/SettingsCard';
 import CodeBlock from '@/components/common/CodeBlock';
 
@@ -11,10 +12,11 @@ type McpOAuthGuideProps = {
 
 export default function McpOAuthGuide({ mcpUrl, discoveryUrl }: McpOAuthGuideProps) {
   const t = useTranslations('mcp');
+  const { appName } = useBranding();
 
   return (
     <SettingsCard className="space-y-5 p-5">
-      <p className="text-sm text-muted-foreground">{t('oauth.description')}</p>
+      <p className="text-sm text-muted-foreground">{t('oauth.description', { app: appName })}</p>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
@@ -31,11 +33,11 @@ export default function McpOAuthGuide({ mcpUrl, discoveryUrl }: McpOAuthGuidePro
         <li>{t('oauth.steps.add')}</li>
         <li>{t('oauth.steps.paste')}</li>
         <li>{t('oauth.steps.choose')}</li>
-        <li>{t('oauth.steps.signIn')}</li>
+        <li>{t('oauth.steps.signIn', { app: appName })}</li>
       </ol>
 
       <p className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-        {t('oauth.security')}
+        {t('oauth.security', { app: appName })}
       </p>
     </SettingsCard>
   );

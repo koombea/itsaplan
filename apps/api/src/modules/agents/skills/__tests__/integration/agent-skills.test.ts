@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { authedApi, type Api } from '#tests/helpers/app';
+import { authedApi, type Api, ownWorkspaceId, createProject } from '#tests/helpers/app';
 import { signUpTestUser } from '#tests/helpers/auth';
 import { resetDb } from '#tests/helpers/db';
 import { untaggedRoutes } from '#tests/helpers/mcp';
@@ -10,13 +10,13 @@ import { createAgent } from '#tests/helpers/agents';
 // The team skill library: SKILL.md documents (plus optional reference files) given to
 // the internal agents of every project the team owns. Content lives in the object
 // store; the row holds metadata. Access is the agent_skills permission resource,
-// resolved on the team. These tests need the object store (MinIO), like the
+// resolved on the team. These tests need the object store (RustFS), like the
 // attachments test.
 
 async function setup() {
   const owner = await signUpTestUser({ name: 'Owner' });
   const asOwner = authedApi(owner.cookie);
-  const project = await asOwner.projects.post({ key: 'MKT', name: 'Marketing' });
+  const project = await createProject(asOwner, { key: 'MKT', name: 'Marketing' });
   return { owner, asOwner, teamId: project.data!.teamId };
 }
 
@@ -113,6 +113,14 @@ describe('agent skills', () => {
     )({ skillId }).references.content.get({ query: { path } });
     expect(content.status).toBe(200);
     expect(content.data?.content).toBe('# Checklist\n\nItem one');
+
+    const transliterated = await skills(
+      asOwner,
+      teamId,
+    )({ skillId }).references.post({
+      file: new File(['Пункт'], 'Чек-лист релиза.md', { type: 'text/markdown' }),
+    });
+    expect(transliterated.data?.files.map((one) => one.path)).toContain('refs/Chek-list_reliza.md');
   });
 
   it("overwrites a reference file's content and updates its size", async () => {
@@ -193,6 +201,58 @@ describe('agent skills', () => {
     expect(options.data?.map((s) => s.name)).toEqual(['Alpha', 'Beta', 'Gamma']);
   });
 
+  it('searches the library by name and description', async () => {
+    const { asOwner, teamId } = await setup();
+    for (const [name, description] of [
+      ['Triage', 'Sort incoming issues'],
+      ['Release notes', 'Write the changelog'],
+      ['Review', 'Check a pull request for 100% coverage'],
+    ]) {
+      await skills(asOwner, teamId).post({
+        source: 'inline',
+        markdown: `---\nname: ${name}\ndescription: ${description}\n---\n\nbody`,
+      });
+    }
+
+    const names = async (search: string) =>
+      (await skills(asOwner, teamId).get({ query: { search } })).data?.items.map((s) => s.name);
+    expect(await names('TRIAGE')).toEqual(['Triage']);
+    expect(await names(' changelog ')).toEqual(['Release notes']);
+    expect(await names('e')).toEqual(['Release notes', 'Review', 'Triage']);
+    // A wildcard in the term is matched as itself.
+    expect(await names('100%')).toEqual(['Review']);
+    expect(await names('nothing')).toEqual([]);
+
+    const page = await skills(asOwner, teamId).get({ query: { search: 'e', pageSize: 1 } });
+    expect(page.data).toMatchObject({ total: 3 });
+
+    const longest = await skills(asOwner, teamId).get({ query: { search: 'x'.repeat(200) } });
+    expect(longest.status).toBe(200);
+    const tooLong = await skills(asOwner, teamId).get({ query: { search: 'x'.repeat(201) } });
+    expect(tooLong.status).toBe(400);
+  });
+
+  it('narrows the library to the chosen sources', async () => {
+    const { asOwner, teamId } = await setup();
+    await skills(asOwner, teamId).post({ source: 'inline', markdown: SKILL_MD });
+    await skills(asOwner, teamId).post({
+      source: 'upload',
+      markdown: `---\nname: Uploaded\ndescription: d\n---\n\nbody`,
+    });
+
+    const names = async (source: string, search?: string) =>
+      (await skills(asOwner, teamId).get({ query: { source, search } })).data?.items.map(
+        (s) => s.name,
+      );
+    expect(await names('upload')).toEqual(['Uploaded']);
+    expect(await names('inline,upload')).toEqual(['Triage', 'Uploaded']);
+    expect(await names('github')).toEqual([]);
+    expect(await names('upload', 'triage')).toEqual([]);
+
+    const unknown = await skills(asOwner, teamId).get({ query: { source: 'inline,ftp' } });
+    expect(unknown.status).toBe(400);
+  });
+
   it('deletes a skill', async () => {
     const { asOwner, teamId } = await setup();
     const created = await skills(asOwner, teamId).post({ source: 'inline', markdown: SKILL_MD });
@@ -229,7 +289,11 @@ describe('agent skills', () => {
   it('ignores a skill of another team when enabling skills on an agent', async () => {
     const { asOwner, teamId } = await setup();
     const mine = await skills(asOwner, teamId).post({ source: 'inline', markdown: SKILL_MD });
-    const otherTeam = await asOwner.teams.post({ name: 'Design' });
+    const otherTeam = await asOwner.teams.post({
+      name: 'Design',
+      slug: 'design',
+      workspaceId: await ownWorkspaceId(asOwner),
+    });
     const theirs = await skills(asOwner, otherTeam.data!.id).post({
       source: 'inline',
       markdown: SKILL_MD,
