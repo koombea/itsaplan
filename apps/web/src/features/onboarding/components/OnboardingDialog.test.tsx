@@ -85,7 +85,7 @@ it('shows no slide of another edition and no link to it', async () => {
   const badges = [...document.querySelectorAll('span')].filter((s) => s.textContent === 'PRO');
   assert.equal(badges.length, 0);
   assert.equal(document.querySelector('a[href*="/pro"]'), null);
-  assert.doesNotMatch(document.body.textContent ?? '', new RegExp(onboarding.proNote));
+  assert.equal((document.body.textContent ?? '').includes(onboarding.proNote), false);
 });
 
 it('describes the schedules without what another edition adds, in every language', () => {
