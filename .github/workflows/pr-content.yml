@@ -18,9 +18,9 @@ jobs:
     name: Check for AI attribution
     runs-on: ubuntu-latest
     steps:
+      # The latest commit of the base branch: base.sha can predate the gate itself.
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 0
           persist-credentials: false
 
