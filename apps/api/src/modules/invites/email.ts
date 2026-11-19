@@ -1,8 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { db, notificationDelivery, getInstanceEmailConfig, team } from '@repo/db';
-import { composeEmail, savedLocaleOf, trustedOrigins } from '@repo/auth';
+import { composeEmail, instanceDefaultLocale, savedLocaleOf, trustedOrigins } from '@repo/auth';
 import {
-  DEFAULT_LOCALE,
   emailWords,
   hasEmailProvider,
   sendEmail,
@@ -21,7 +20,7 @@ async function inviteLocale(invite: InviteRow): Promise<Locale> {
   const invited = await savedLocaleOf(invite.email);
   if (invited) return invited;
   const sender = invite.invitedByEmail ? await savedLocaleOf(invite.invitedByEmail) : null;
-  return sender ?? DEFAULT_LOCALE;
+  return sender ?? (await instanceDefaultLocale());
 }
 
 function inviterName(invite: InviteRow, words: EmailWords): string {

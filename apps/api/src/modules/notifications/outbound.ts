@@ -13,8 +13,13 @@ import {
   type DeliveryPayload,
 } from '@repo/db';
 import { eq, inArray } from 'drizzle-orm';
-import { composeEmail, isAccountDeactivated, savedLocales } from '@repo/auth';
-import { DEFAULT_LOCALE, emailWords, type CoreEmailKey, type Locale } from '@repo/mailer';
+import {
+  composeEmail,
+  instanceDefaultLocale,
+  isAccountDeactivated,
+  savedLocales,
+} from '@repo/auth';
+import { emailWords, type CoreEmailKey, type Locale } from '@repo/mailer';
 import { readRedactedSettings } from '#modules/notification-settings/service';
 import { getPreferencesForUsers } from '#modules/notification-preferences/service';
 import { getTelegramChatIds, hasUsableInstanceBot } from '#modules/telegram/service';
@@ -318,6 +323,7 @@ export async function enqueueOutbound(
     return email;
   };
 
+  const fallbackLocale = await instanceDefaultLocale();
   const out: OutboxRow[] = [];
   for (const n of notifications) {
     const prefs = prefsByUser.get(n.userId);
@@ -329,7 +335,7 @@ export async function enqueueOutbound(
         projectId,
         channel: 'email',
         recipient: email,
-        payload: await emailFor(n.type, localeByUser.get(n.userId) ?? DEFAULT_LOCALE),
+        payload: await emailFor(n.type, localeByUser.get(n.userId) ?? fallbackLocale),
       });
     }
     if (telegramEnabled && prefs.telegramEvents[n.type]) {

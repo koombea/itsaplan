@@ -34,8 +34,9 @@ import {
   getOidcConfig,
   isOidcUsable,
   isAccountDeactivated,
+  instanceDefaultLocale,
 } from './instance';
-import { emailLocale, instanceDefaultLocale, sendAuthEmail } from './mail';
+import { emailLocale, sendAuthEmail } from './mail';
 import { readAuthExtensions } from './extensions';
 import { trustedOrigins } from './origins';
 
@@ -1143,6 +1144,8 @@ export {
   setEmailSettings,
   getEmailTemplateSettings,
   setEmailTemplateSettings,
+  BRANDING_SETTING_KEY,
+  instanceDefaultLocale,
   resolveEmailConfig,
   getGoogleSettings,
   setGoogleSettings,

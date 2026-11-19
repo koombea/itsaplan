@@ -1,5 +1,6 @@
 import { describe, it, expect, afterAll, afterEach, beforeAll, beforeEach } from 'bun:test';
-import { db, notificationDelivery } from '@repo/db';
+import { db, notificationDelivery, setSetting, userPreference } from '@repo/db';
+import { eq } from 'drizzle-orm';
 import { authedApi, createProject } from '#tests/helpers/app';
 import { signUpTestUser, type TestUser } from '#tests/helpers/auth';
 import { resetDb } from '#tests/helpers/db';
@@ -282,6 +283,24 @@ describe('invites', () => {
       expect(email('newcomer@example.com').text).toContain('с ролью владелец');
       expect(email('newcomer@example.com').html).toContain('class="button"');
       expect(email(known.email).subject).toBe("Vous êtes invité à Marketing sur It's a Plan");
+    });
+
+    it('writes a queued invite in the instance default language when nobody saved one', async () => {
+      const { api } = await setupOwner();
+      await configureEmail(api);
+      await setSetting('branding', { defaultLocale: 'es-ES' });
+      await db.delete(userPreference);
+
+      await api.projects({ projectKey: 'MKT' }).invites.post({
+        email: 'newcomer@example.com',
+        role: 'member',
+      });
+
+      const [queued] = await db
+        .select({ payload: notificationDelivery.payload })
+        .from(notificationDelivery)
+        .where(eq(notificationDelivery.recipient, 'newcomer@example.com'));
+      expect(queued!.payload.subject).toBe("Te han invitado a Marketing en It's a Plan");
     });
 
     it('still creates the link when no email provider is configured', async () => {

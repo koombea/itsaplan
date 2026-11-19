@@ -14,9 +14,9 @@ import {
   type Locale,
   type RenderedEmail,
 } from '@repo/mailer';
-import { db, getInstanceEmailConfig, getSetting, user, userPreference } from '@repo/db';
+import { db, getInstanceEmailConfig, user, userPreference } from '@repo/db';
 import { eq, inArray } from 'drizzle-orm';
-import { getEmailTemplateSettings } from './instance';
+import { getEmailTemplateSettings, instanceDefaultLocale } from './instance';
 import { trustedOrigins } from './origins';
 
 function emailSite(): EmailSite {
@@ -77,13 +77,6 @@ export async function savedLocaleOf(email: string): Promise<Locale | null> {
     .innerJoin(user, eq(user.id, userPreference.userId))
     .where(eq(user.email, email.toLowerCase()));
   return isLocale(row?.locale) ? row.locale : null;
-}
-
-// The language set with the instance branding in god mode (app_setting 'branding', written
-// by the api's settings module). It is what a browser asking for no shipped language gets.
-export async function instanceDefaultLocale(): Promise<Locale | undefined> {
-  const branding = await getSetting<{ defaultLocale?: string }>('branding');
-  return isLocale(branding?.defaultLocale) ? branding.defaultLocale : undefined;
 }
 
 // The language an address chose, or the language of the browser asking when it has none yet:

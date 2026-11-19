@@ -10,6 +10,7 @@ import {
   type JobSettingsPatch,
   type StorageSettings,
 } from '@repo/db';
+import { BRANDING_SETTING_KEY } from '@repo/auth';
 import type { Locale } from '@repo/mailer';
 import { HttpError } from '#shared/lib';
 
@@ -71,8 +72,6 @@ export async function setProjectDefaults(
 // instance presents instead of the built-in one. Every field defaults to what the
 // web app ships with, so an instance that never opens the screen keeps today's
 // appearance and no row is written.
-
-export const BRANDING_SETTING_KEY = 'branding';
 
 export interface BrandingSettings {
   appName: string;

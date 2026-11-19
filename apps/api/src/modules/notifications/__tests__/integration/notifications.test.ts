@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { db, notificationDelivery } from '@repo/db';
+import { db, notificationDelivery, setSetting, userPreference } from '@repo/db';
 import { asc, eq } from 'drizzle-orm';
 import { authedApi, type Api, createProject } from '#tests/helpers/app';
 import { signUpTestUser } from '#tests/helpers/auth';
@@ -354,6 +354,48 @@ describe('notifications', () => {
       `${issueLink}#comment-${comment.id}`,
       issueLink,
     ]);
+  });
+
+  it('sends the email in the instance default language to a recipient who saved none', async () => {
+    const { owner, project, columnId, doneColumnId } = await setup();
+    const member = await addMember(owner);
+    await owner.api.teams({ teamId: project.teamId })['notification-settings'].put({
+      smtp: {
+        enabled: true,
+        host: 'smtp.example.com',
+        port: 587,
+        encryption: 'none',
+        username: 'mailer@example.com',
+        password: 'secret',
+        timeout: null,
+      },
+    });
+    const events = { assigned: true, mentioned: true, commented: true, state_changed: true };
+    await member.api.projects({ projectKey: 'MKT' })['notification-preferences'].put({
+      emailEvents: events,
+      telegramEvents: events,
+    });
+    await setSetting('branding', { defaultLocale: 'ru' });
+    await db.delete(userPreference).where(eq(userPreference.userId, member.userId));
+    await owner.api.god['email-templates'].put({
+      edits: {
+        stateChanged: {
+          ru: { subject: 'Статус {ref}: {to}', body: '{title}', button: 'Открыть' },
+        },
+      },
+      layout: null,
+    });
+    const issue = (
+      await createIssue(owner.api, columnId, { title: 'Title', assigneeUserId: member.userId })
+    ).data!;
+    await db.delete(notificationDelivery);
+
+    await owner.api.issues({ issueId: issue.id }).patch({ columnId: doneColumnId });
+
+    const [queued] = await db
+      .select({ payload: notificationDelivery.payload })
+      .from(notificationDelivery);
+    expect(queued!.payload.subject).toStartWith(`Статус ${issue.identifier}:`);
   });
 
   it('sends each recipient the email in their language, with what god changed', async () => {

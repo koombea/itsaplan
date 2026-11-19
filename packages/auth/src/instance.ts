@@ -14,7 +14,9 @@ import {
 } from '@repo/db';
 import { and, eq, gte, like, lt, sql } from 'drizzle-orm';
 import {
+  DEFAULT_LOCALE,
   hasEmailProvider,
+  isLocale,
   type EmailLayout,
   type EmailText,
   type Locale,
@@ -322,6 +324,16 @@ export async function getEmailTemplateSettings(): Promise<EmailTemplateSettings>
       layout: null,
     }
   );
+}
+
+// The instance branding, written by the api's settings module in god mode.
+export const BRANDING_SETTING_KEY = 'branding';
+
+// The language set with the branding. A person who saved none, and a browser asking for
+// none the app ships, gets it.
+export async function instanceDefaultLocale(): Promise<Locale> {
+  const branding = await getSetting<{ defaultLocale?: string }>(BRANDING_SETTING_KEY);
+  return isLocale(branding?.defaultLocale) ? branding.defaultLocale : DEFAULT_LOCALE;
 }
 
 export async function setEmailTemplateSettings(settings: EmailTemplateSettings): Promise<void> {
