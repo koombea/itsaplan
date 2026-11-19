@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BUN_VERSION: 1.4.0
+  BUN_VERSION: 1.4.4
 
 permissions:
   contents: read
@@ -46,11 +46,18 @@ jobs:
         run: bun run typecheck
 
       # High and critical advisories fail the job; moderate and lower only print.
+      # TODO(croffasia): drop GHSA-fc5q-39xc-vjpf (picomatch ReDoS) once picomatch has a
+      # patched release; 4.0.7 is the latest. No user-supplied glob reaches it: the api gets
+      # it only through Mastra's workspace and skill loaders, which it does not use, and the
+      # other paths are build tools.
       - name: Audit dependencies
-        run: bun audit --audit-level=high
+        run: bun audit --audit-level=high --ignore=GHSA-fc5q-39xc-vjpf
 
       - name: Script tests
         run: bun test scripts/
+
+      - name: Mailer tests
+        run: bun test packages/mailer/
 
   build:
     name: Build apps
@@ -81,16 +88,16 @@ jobs:
       - uses: actions/checkout@v7
 
       # Integration tests need a live database, so they run in the compose gate:
-      # a throwaway Postgres and MinIO, with the api built from the production
+      # a throwaway Postgres and RustFS, with the api built from the production
       # Dockerfile. Building both api-test and worker-test also verifies their
       # Dockerfiles build.
       - name: Build test images
         run: docker compose -f docker-compose.test.yml build
 
-      # `run` starts api-test's dependencies (Postgres healthy, the MinIO bucket
+      # `run` starts api-test's dependencies (Postgres healthy, the RustFS bucket
       # init completed), runs the suite, and exits with its code. It does not use
       # --abort-on-container-exit, which would tear the stack down the moment the
-      # one-shot minio-test-init exits, before api-test starts.
+      # one-shot rustfs-test-init exits, before api-test starts.
       - name: Run the compose test gate
         run: docker compose -f docker-compose.test.yml run --rm api-test
 

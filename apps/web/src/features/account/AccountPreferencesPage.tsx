@@ -8,7 +8,6 @@ import type {
   IssueOpenMode,
   IssueStatsView,
   StartPage,
-  ThemePreference,
 } from '@/lib/api/endpoints/userPreferences';
 import { LOCALES, LOCALE_LABELS } from '@/i18n/locales';
 import {
@@ -22,18 +21,21 @@ import AccountPreferenceRow from './components/preferences/AccountPreferenceRow'
 import AccountPreferenceSelect from './components/preferences/AccountPreferenceSelect';
 import AccountPreferencesSection from './components/preferences/AccountPreferencesSection';
 import AccountPreferencesTimezone from './components/preferences/AccountPreferencesTimezone';
+import AccountPreferencesColorTheme from './components/preferences/AccountPreferencesColorTheme';
+import AccountDesktopNotifications from './components/preferences/AccountDesktopNotifications';
+import AccountPushNotifications from './components/preferences/AccountPushNotifications';
 import AccountHotkeys from './components/preferences/AccountHotkeys';
 import AccountPreferencesNav from './components/preferences/AccountPreferencesNav';
 import AccountPreferencesSaveState from './components/preferences/AccountPreferencesSaveState';
 
-const THEMES: ThemePreference[] = ['system', 'light', 'dark'];
 const ISSUE_OPEN_MODES: IssueOpenMode[] = ['panel', 'page'];
 const ISSUE_STATS_VIEWS: IssueStatsView[] = ['compact', 'timeline'];
 const ISSUE_ACTIVITY_VIEWS: IssueActivityView[] = ['flat', 'grouped'];
 const START_PAGES: StartPage[] = ['work-items', 'inbox', 'dashboard', 'initiatives'];
 
 // Personal interface preferences (/account/preferences). Each choice saves as soon
-// as it is made and applies on every device the user signs in from.
+// as it is made and applies on every device the user signs in from, except desktop and
+// push notifications, which are turned on per browser.
 export default function AccountPreferencesPage() {
   const t = useTranslations('account.preferences');
   const { data, isPending } = useAccountPreferencesQuery();
@@ -58,14 +60,12 @@ export default function AccountPreferencesPage() {
       nav={<AccountPreferencesNav />}
     >
       <AccountPreferencesSection id="appearance" title={t('sections.appearance')}>
-        <AccountPreferenceRow label={t('theme')} description={t('themeDescription')}>
-          <AccountPreferenceSelect
-            value={prefs.theme}
-            options={THEMES.map((value) => ({ value, label: t(`themeOptions.${value}`) }))}
-            onChange={(theme) => save({ theme })}
-            disabled={disabled}
-          />
-        </AccountPreferenceRow>
+        <AccountPreferencesColorTheme
+          prefs={prefs}
+          save={save}
+          saveQuietly={(patch) => update.mutate(patch)}
+          disabled={disabled}
+        />
         <AccountPreferenceRow label={t('language')} description={t('languageDescription')}>
           <AccountPreferenceSelect
             value={prefs.locale}
@@ -76,11 +76,7 @@ export default function AccountPreferencesPage() {
         </AccountPreferenceRow>
       </AccountPreferencesSection>
 
-      <AccountPreferencesSection
-        id="date-and-time"
-        title={t('sections.dateAndTime')}
-        description={t('sections.dateAndTimeDescription')}
-      >
+      <AccountPreferencesSection id="date-and-time" title={t('sections.dateAndTime')}>
         <AccountPreferenceRow label={t('timezone')} description={t('timezoneDescription')}>
           <AccountPreferencesTimezone
             value={prefs.timezone}
@@ -90,15 +86,8 @@ export default function AccountPreferencesPage() {
         </AccountPreferenceRow>
       </AccountPreferencesSection>
 
-      <AccountPreferencesSection
-        id="navigation"
-        title={t('sections.navigation')}
-        description={t('sections.navigationDescription')}
-      >
-        <AccountPreferenceRow
-          label={t('issueOpenMode')}
-          description={t('issueOpenModeDescription')}
-        >
+      <AccountPreferencesSection id="navigation" title={t('sections.navigation')}>
+        <AccountPreferenceRow label={t('issueOpenMode')}>
           <AccountPreferenceSelect
             value={prefs.issueOpenMode}
             options={ISSUE_OPEN_MODES.map((value) => ({
@@ -127,7 +116,7 @@ export default function AccountPreferencesPage() {
         title={t('sections.issueSettings')}
         description={t('sections.issueSettingsDescription')}
       >
-        <AccountPreferenceRow label={t('showStats')} description={t('showStatsDescription')}>
+        <AccountPreferenceRow label={t('showStats')}>
           <Switch
             checked={prefs.issueStatsOpen}
             onCheckedChange={(issueStatsOpen) => save({ issueStatsOpen })}
@@ -170,6 +159,8 @@ export default function AccountPreferencesPage() {
             disabled={disabled}
           />
         </AccountPreferenceRow>
+        <AccountDesktopNotifications />
+        <AccountPushNotifications />
       </AccountPreferencesSection>
 
       <AccountPreferencesSection id="ai-chat" title={t('sections.aiChat')}>

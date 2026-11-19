@@ -2,8 +2,7 @@ import { Elysia, t } from 'elysia';
 import { noContent } from '#shared/http';
 import { guards } from '#shared/guards';
 import { authContext } from '#shared/auth-context';
-import { requireUser } from '#shared/access';
-import { getMembership } from '#modules/members/service';
+import { getProjectAccess, requireUser } from '#shared/access';
 import { HttpError } from '#shared/lib';
 import { mcpTool } from '#mcp/generate';
 import { accessErrors, commonErrors } from '#shared/responses';
@@ -87,7 +86,8 @@ export const noteBoardRoutes = new Elysia({
       detail: {
         summary: "List a project's note boards",
         description:
-          "The boards the caller can see: the project's public boards, the caller's own private ones, and the boards they were granted access to, most recently updated first. `q` filters by name. Cards are omitted — read a board to get them.",
+          'List the note boards you can see, most recently updated first: public boards, your ' +
+          'private boards and boards shared with you. Cards are not included: use get_note_board.',
         ...mcpTool('list_note_boards'),
       },
     },
@@ -121,7 +121,11 @@ export const noteBoardRoutes = new Elysia({
       detail: {
         summary: 'Get a note board with its canvas',
         description:
-          'One board with its `canvas`, a React Flow graph `{ nodes, edges }`. A card (sticker, note) is a node: `{ id, type: "sticker", position: { x, y }, width, height, data: { title, body, color } }`, where `body` is markdown and `color` a hex string. A connection between two cards is an edge: `{ id, source, target }` of node ids. Cards exist only inside the canvas.',
+          'Get a board with its `canvas`, a React Flow graph `{ nodes, edges }`. A card ' +
+          '(sticker, note) is a node: `{ id, type: "sticker", position: { x, y }, width, height, ' +
+          'data: { title, body, color } }`. `body` is markdown and `color` is a hex string. A ' +
+          'connection between two cards is an edge: `{ id, source, ' +
+          'target }` of node ids. Cards exist only in the canvas.',
         ...mcpTool('get_note_board'),
       },
     },
@@ -148,7 +152,8 @@ export const noteBoardRoutes = new Elysia({
       detail: {
         summary: 'Create a note board',
         description:
-          'Create a board. `visibility` "private" keeps it to the caller, "public" (the default) shows it to every project member. Cards go in `canvas` as nodes (see `get_note_board`); a card `body` is markdown and `color` a hex string such as `#FFF9B1`.',
+          "Create a note board. `visibility` 'private' shows it only to you. 'public' (default) " +
+          'shows it to all project members. Put cards in `canvas` as nodes (see get_note_board).',
         ...mcpTool('create_note_board'),
       },
     },
@@ -198,7 +203,13 @@ export const noteBoardRoutes = new Elysia({
       detail: {
         summary: 'Update a note board',
         description:
-          'Rename a board, change who sees it, or replace its `canvas`. `visibility` is "public" (every project member), "private" (the creator alone), or "restricted" (the creator plus the project members in `memberIds`, which replaces the granted list as a whole). Only the board creator can change either. Adding, editing, connecting, or deleting a card is a change to `canvas` (see `get_note_board`). It is replaced as a whole: read the board first, then send every node and edge that must stay — anything left out is deleted.',
+          'Rename a board, change its visibility, or replace its `canvas`. `visibility` is ' +
+          "'public' (all project members), 'private' (only the creator), or 'restricted' (the " +
+          'creator and the members in `memberIds`, which replaces the whole list). Only the ' +
+          'board creator can change `visibility` and `memberIds`. To add, edit, connect or ' +
+          'delete a card, change `canvas` (see get_note_board). `canvas` is replaced as a whole: ' +
+          'read the board first, then send every node ' +
+          'and edge to keep. Anything left out is deleted.',
         ...mcpTool('update_note_board', { destructiveHint: true }),
       },
     },
@@ -212,7 +223,7 @@ export const noteBoardRoutes = new Elysia({
       if (!board || board.projectId !== project.id) throw new HttpError(404, 'Board not found');
       // A project owner deletes any board, a private one included: the board of a
       // member who left the project would otherwise stay for good.
-      if ((await getMembership(project.id, userId)) !== 'owner') {
+      if ((await getProjectAccess(project.id, userId))?.role !== 'owner') {
         assertBoardVisible(board, userId);
         // A private or restricted board belongs to the member who made it, and
         // being granted a view of one does not carry deleting it. A public board
@@ -235,7 +246,9 @@ export const noteBoardRoutes = new Elysia({
       detail: {
         summary: 'Delete a note board',
         description:
-          'Permanently delete a note board and every note on it. A public board is open to every member the role matrix allows; a private or restricted one only to the member who made it. A project owner deletes any board, including one they cannot see.',
+          'Permanently delete a note board and all its cards. A public board: any member the ' +
+          'role matrix allows. A private or restricted board: only its creator. A project owner ' +
+          'can delete any board, even one they cannot see.',
         ...mcpTool('delete_note_board'),
       },
     },

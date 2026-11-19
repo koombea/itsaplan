@@ -2,14 +2,18 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
+import { usePathname } from 'next/navigation';
 import { useSession } from '@/lib/auth-client';
+import { GOD_SECTIONS } from '@/utils/godSections';
+import { useGodSectionText } from '@/hooks/useSectionLabels';
+import { titlePath, useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { SidebarInset, SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { Separator } from '@/components/ui/separator';
-import { ThemeToggle } from '@/components/theme-toggle';
-import { LocaleToggle } from '@/components/locale-toggle';
+import InterfaceMenu from '@/components/layout/InterfaceMenu';
 import SectionPageSkeleton from '@/components/common/skeleton/SectionPageSkeleton';
 import UserMenu from '@/components/layout/UserMenu';
 import GodSidebar from '@/components/layout/GodSidebar';
+import { ShellNotice } from '@/cloud';
 
 // The shell for god mode: the instance settings sidebar and a slim header, with no
 // project loaded. It is the counterpart of Shell for the project routes, but far
@@ -33,6 +37,10 @@ export default function GodShell({
   useEffect(() => setMounted(true), []);
   const isGod = mounted && session?.user.role === 'god';
   const sessionSettled = mounted && !isPending;
+  const god = useGodSectionText();
+  const slug = usePathname().split('/')[2];
+  const section = GOD_SECTIONS.find((entry) => entry.slug === slug);
+  useDocumentTitle(titlePath(t('godMode'), section && god.section(section.slug).label));
 
   return (
     <SidebarProvider defaultOpen={defaultSidebarOpen} className="h-svh overflow-hidden">
@@ -43,11 +51,11 @@ export default function GodShell({
           <Separator orientation="vertical" className="mr-1 h-4" />
           <div className="min-w-0 truncate text-sm font-medium">{t('godMode')}</div>
           <div className="ml-auto flex items-center gap-2">
-            <LocaleToggle />
-            <ThemeToggle />
+            <InterfaceMenu />
             <UserMenu />
           </div>
         </header>
+        <ShellNotice />
 
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
           {isGod && children}

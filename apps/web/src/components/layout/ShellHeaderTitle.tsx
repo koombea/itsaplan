@@ -1,8 +1,8 @@
 import { useTranslations } from 'next-intl';
-import { SETTINGS_SECTIONS } from '@/utils/settingsSections';
 import type { IssueRef } from '@/lib/api/endpoints/issues';
 import type { ShellRoute } from '@/hooks/useShellRoute';
 import { useSettingsSectionText } from '@/hooks/useSectionLabels';
+import { useProjectSections } from '@/hooks/useSettingsNavGroups';
 import CycleBreadcrumb from '@/components/layout/CycleBreadcrumb';
 import InitiativeBreadcrumb from '@/components/layout/InitiativeBreadcrumb';
 import IssueBreadcrumb from '@/components/layout/IssueBreadcrumb';
@@ -13,28 +13,29 @@ export default function ShellHeaderTitle({
   route,
   projectName,
   issueIdentifier,
-  issueParent,
+  issueAncestors,
 }: {
   route: ShellRoute;
   projectName: string;
   issueIdentifier: string | null;
-  issueParent: IssueRef | null;
+  issueAncestors: IssueRef[];
 }) {
   const t = useTranslations('nav');
   const sectionText = useSettingsSectionText();
+  const sections = useProjectSections();
 
   // The label on the pages that are not an issue, initiative or cycle detail. An
-  // /ai-team route names its section.
+  // /agents/:section route names its section.
   function pageLabel(): string {
     const { sub, section, aiTeamSection } = route;
-    const known = (slug: string) => SETTINGS_SECTIONS.some((s) => s.slug === slug);
+    const known = (slug: string) => sections.some((s) => s.slug === slug);
     if (section) return known(section) ? sectionText(section).label : t('projectSettings');
     if (sub === 'members') return t('members');
-    if (sub === 'dashboard') return t('dashboards');
+    if (sub === 'dashboards') return t('dashboards');
     if (sub === 'initiatives') return t('initiatives');
     if (sub === 'cycles') return t('cycles');
     if (aiTeamSection) return known(aiTeamSection) ? sectionText(aiTeamSection).label : t('aiTeam');
-    if (sub === 'ai-agents') return t('aiAgents');
+    if (sub === 'agents') return t('aiAgents');
     if (sub === 'api') return t('api');
     return projectName;
   }
@@ -45,7 +46,7 @@ export default function ShellHeaderTitle({
         projectKey={route.projectKey}
         projectName={projectName}
         identifier={issueIdentifier}
-        parent={issueParent}
+        ancestors={issueAncestors}
       />
     );
   }

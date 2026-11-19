@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { authedApi, type Api } from '#tests/helpers/app';
+import { authedApi, type Api, ownWorkspaceId, createProject } from '#tests/helpers/app';
 import { signUpTestUser } from '#tests/helpers/auth';
 import { resetDb } from '#tests/helpers/db';
 import { createCredential } from '#tests/helpers/integrations';
@@ -7,6 +7,7 @@ import { untaggedRoutes } from '#tests/helpers/mcp';
 import { addProjectMember } from '#tests/helpers/members';
 import { createRole } from '#tests/helpers/roles';
 import { createAgent } from '#tests/helpers/agents';
+import { listAgentToolsForRun } from '../../service';
 
 // Configured tools of a team, shared by every project it owns: a catalog tool bound to
 // an integration credential. The secret lives on the credential, so a configured tool
@@ -16,7 +17,7 @@ import { createAgent } from '#tests/helpers/agents';
 async function setup() {
   const owner = await signUpTestUser({ name: 'Owner' });
   const asOwner = authedApi(owner.cookie);
-  const project = await asOwner.projects.post({ key: 'MKT', name: 'Marketing' });
+  const project = await createProject(asOwner, { key: 'MKT', name: 'Marketing' });
   return { owner, asOwner, teamId: project.data!.teamId };
 }
 
@@ -80,6 +81,59 @@ describe('agent tools', () => {
     expect(dup.status).toBe(409);
   });
 
+  it('configures a tool whose integration needs no credential once per team', async () => {
+    const { asOwner, teamId } = await setup();
+    const res = await tools(asOwner, teamId).post({ toolKey: 'pdf_read' });
+    expect(res.status).toBe(201);
+    expect(res.data).toMatchObject({
+      toolKey: 'pdf_read',
+      credentialId: null,
+      integrationKey: 'pdf',
+      credentialLabel: null,
+    });
+    expect((await tools(asOwner, teamId).post({ toolKey: 'pdf_read' })).status).toBe(409);
+
+    const agent = await createAgent(asOwner, 'MKT', {
+      name: 'Bot',
+      username: 'bot',
+      kind: 'internal',
+    });
+    const agentId = agent.data!.agent.id;
+    const set = await agents(
+      asOwner,
+      teamId,
+    )({ agentId })['tool-configs'].put({ agentToolIds: [res.data!.id] });
+    expect(set.data).toMatchObject([{ toolKey: 'pdf_read', integrationKey: 'pdf' }]);
+    expect(await listAgentToolsForRun(agentId)).toEqual([
+      { id: res.data!.id, toolKey: 'pdf_read', credential: {} },
+    ]);
+  });
+
+  it('refuses a credential for a tool that takes none, and no credential for one that needs it', async () => {
+    const { asOwner, teamId } = await setup();
+    const credentialId = await jinaCredential(asOwner);
+    const extra = await tools(asOwner, teamId).post({ toolKey: 'pdf_read', credentialId });
+    expect(extra.status).toBe(400);
+    const missing = await tools(asOwner, teamId).post({ toolKey: 'jina_reader' });
+    expect(missing.status).toBe(400);
+  });
+
+  it('adds a tool whose credential is optional with no key and again on a key', async () => {
+    const { asOwner, teamId } = await setup();
+    const keyless = await tools(asOwner, teamId).post({ toolKey: 'keenable_search' });
+    expect(keyless.status).toBe(201);
+    expect(keyless.data).toMatchObject({ credentialId: null, integrationKey: 'keenable' });
+
+    const credentialId = await createCredential(asOwner, 'MKT', {
+      integrationKey: 'keenable',
+      credential: { apiKey: 'keen_test' },
+    });
+    const keyed = await tools(asOwner, teamId).post({ toolKey: 'keenable_search', credentialId });
+    expect(keyed.status).toBe(201);
+    expect(keyed.data).toMatchObject({ credentialId, integrationKey: 'keenable' });
+    expect((await tools(asOwner, teamId).post({ toolKey: 'keenable_search' })).status).toBe(409);
+  });
+
   it('binds different Jina tools to different credentials', async () => {
     const { asOwner, teamId } = await setup();
     const keyA = await jinaCredential(asOwner);
@@ -117,6 +171,51 @@ describe('agent tools', () => {
     expect(second.data?.items[0].id).not.toBe(first.data!.items[0].id);
 
     expect((await tools(asOwner, teamId).options.get()).data).toHaveLength(2);
+  });
+
+  it('searches the list by tool name, integration and group', async () => {
+    const { asOwner, teamId } = await setup();
+    const credentialId = await jinaCredential(asOwner);
+    await tools(asOwner, teamId).post({ toolKey: 'jina_reader', credentialId });
+    await tools(asOwner, teamId).post({ toolKey: 'jina_search', credentialId });
+    await tools(asOwner, teamId).post({ toolKey: 'pdf_read' });
+
+    const keys = async (search: string) =>
+      (await tools(asOwner, teamId).get({ query: { search } })).data?.items.map((i) => i.toolKey);
+    expect(await keys('reader')).toEqual(['jina_reader']);
+    // Newest first.
+    expect(await keys('JINA AI')).toEqual(['jina_search', 'jina_reader']);
+    expect(await keys(' pdf ')).toEqual(['pdf_read']);
+    expect(await keys('discussions')).toEqual([]);
+
+    const page = await tools(asOwner, teamId).get({ query: { search: 'jina', pageSize: 1 } });
+    expect(page.data).toMatchObject({ total: 2 });
+    expect(page.data?.items).toHaveLength(1);
+
+    const longest = await tools(asOwner, teamId).get({ query: { search: 'x'.repeat(200) } });
+    expect(longest.status).toBe(200);
+    const tooLong = await tools(asOwner, teamId).get({ query: { search: 'x'.repeat(201) } });
+    expect(tooLong.status).toBe(400);
+  });
+
+  it("narrows the list to some integrations' tools", async () => {
+    const { asOwner, teamId } = await setup();
+    const credentialId = await jinaCredential(asOwner);
+    await tools(asOwner, teamId).post({ toolKey: 'jina_reader', credentialId });
+    await tools(asOwner, teamId).post({ toolKey: 'pdf_read' });
+
+    const keys = async (query: { group: string; search?: string }) =>
+      (await tools(asOwner, teamId).get({ query })).data?.items.map((i) => i.toolKey);
+    expect(await keys({ group: 'jina' })).toEqual(['jina_reader']);
+    expect(await keys({ group: 'pdf' })).toEqual(['pdf_read']);
+    expect(await keys({ group: 'pdf,jina' })).toEqual(['pdf_read', 'jina_reader']);
+    expect(await keys({ group: 'pdf', search: 'jina' })).toEqual([]);
+    expect(await keys({ group: 'jina_reader' })).toEqual([]);
+
+    const longest = await tools(asOwner, teamId).get({ query: { group: 'x'.repeat(1000) } });
+    expect(longest.status).toBe(200);
+    const tooLong = await tools(asOwner, teamId).get({ query: { group: 'x'.repeat(1001) } });
+    expect(tooLong.status).toBe(400);
   });
 
   it('serves one configured tool to every project of the team', async () => {
@@ -182,7 +281,11 @@ describe('agent tools', () => {
       toolKey: 'jina_reader',
       credentialId: await jinaCredential(asOwner),
     });
-    const otherTeam = await asOwner.teams.post({ name: 'Design' });
+    const otherTeam = await asOwner.teams.post({
+      name: 'Design',
+      slug: 'design',
+      workspaceId: await ownWorkspaceId(asOwner),
+    });
     await asOwner
       .teams({ teamId: otherTeam.data!.id })
       .projects.post({ key: 'DSG', name: 'Design' });

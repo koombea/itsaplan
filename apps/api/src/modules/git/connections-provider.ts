@@ -5,6 +5,9 @@ import type { PipelineEvent, PullRequestEvent, PullRequestState } from './provid
 
 export type GitProvider = 'github' | 'gitlab' | 'gitea' | 'forgejo' | 'bitbucket';
 
+export const DEVELOPMENT_PROVIDERS = ['github', 'gitlab', 'gitea', 'forgejo'] as const;
+export type DevelopmentProvider = (typeof DEVELOPMENT_PROVIDERS)[number];
+
 export interface ProviderRepository {
   externalId: string;
   fullName: string;
@@ -182,7 +185,7 @@ export function providerErrorMessage(
 async function providerRequest(
   input: ProviderConnectionInput,
   path: string,
-  init: RequestInit = {},
+  init: RequestInit & { allowMissing?: boolean } = {},
 ): Promise<Response> {
   const headers = providerHeaders(input.provider, input.token);
   if (init.body !== undefined) headers.set('content-type', 'application/json');
@@ -201,8 +204,8 @@ async function providerRequest(
       `${PROVIDER_LABEL[input.provider]} could not be reached. Check the provider URL and network access.`,
     );
   }
-  const missingDelete = init.method === 'DELETE' && response.status === 404;
-  if (!response.ok && !missingDelete) {
+  const missing = response.status === 404 && (init.method === 'DELETE' || init.allowMissing);
+  if (!response.ok && !missing) {
     const body = record(
       await response
         .clone()
@@ -384,13 +387,7 @@ export async function listProviderRepositories(
     const needle = search.toLowerCase();
     repositories = repositories.filter((repo) => repo.fullName.toLowerCase().includes(needle));
   }
-  const providerNext = response.headers.get('x-next-page');
-  const nextPage = providerNext
-    ? Number(providerNext) || null
-    : body.length === perPage
-      ? page + 1
-      : null;
-  return { repositories, nextPage };
+  return { repositories, nextPage: nextPageNumber(response, page, body.length, perPage) };
 }
 
 export async function getProviderRepository(
@@ -548,9 +545,50 @@ function githubWorkflowRun(
   };
 }
 
-function ensureDevelopmentProvider(provider: GitProvider): asserts provider is 'github' | 'gitlab' {
-  if (provider !== 'github' && provider !== 'gitlab')
-    throw new HttpError(400, 'Creating and linking pull requests supports GitHub and GitLab');
+export function ensureDevelopmentProvider(
+  provider: string,
+): asserts provider is DevelopmentProvider {
+  if (!(DEVELOPMENT_PROVIDERS as readonly string[]).includes(provider))
+    throw new HttpError(
+      400,
+      'Creating and linking pull requests supports GitHub, GitLab, Gitea and Forgejo',
+    );
+}
+
+// A Forgejo server labels its webhook deliveries 'forgejo' even on a connection saved as
+// Gitea, and a development link is matched to later deliveries by that label. Only Forgejo
+// serves this route and Gitea answers 404. Any other answer, such as a proxy refusing the
+// path, keeps the provider the connection was saved as.
+export async function resolveLinkProvider(
+  input: ProviderConnectionInput & { provider: DevelopmentProvider },
+): Promise<DevelopmentProvider> {
+  if (input.provider !== 'gitea' && input.provider !== 'forgejo') return input.provider;
+  const response = await pinnedFetch(`${input.baseUrl}/api/forgejo/v1/version`, {
+    headers: providerHeaders(input.provider, input.token),
+    timeoutMs: 15_000,
+  }).catch(() => null);
+  if (response?.ok) return 'forgejo';
+  if (response?.status === 404) return 'gitea';
+  return input.provider;
+}
+
+// Gitea and Forgejo cap the page size on the server and name the next page only in the
+// Link header, so a page shorter than requested is not always the last one.
+function nextPageNumber(
+  response: Response,
+  page: number,
+  count: number,
+  perPage: number,
+): number | null {
+  const providerNext = response.headers.get('x-next-page');
+  if (providerNext) return Number(providerNext) || null;
+  const link = response.headers.get('link');
+  if (link) return link.includes('rel="next"') ? page + 1 : null;
+  return count === perPage ? page + 1 : null;
+}
+
+function pageSizeParam(provider: DevelopmentProvider): 'limit' | 'per_page' {
+  return provider === 'gitea' || provider === 'forgejo' ? 'limit' : 'per_page';
 }
 
 export async function listProviderPullRequests(
@@ -563,39 +601,34 @@ export async function listProviderPullRequests(
   const perPage = 50;
   const params = new URLSearchParams({
     page: String(page),
-    per_page: String(perPage),
+    [pageSizeParam(input.provider)]: String(perPage),
   });
-  if (input.provider === 'github') {
-    params.set('state', state);
-    params.set('sort', 'updated');
-    params.set('direction', 'desc');
-  } else {
+  if (input.provider === 'gitlab') {
     params.set('scope', 'all');
     params.set('state', state === 'open' ? 'opened' : 'all');
     params.set('order_by', 'updated_at');
     params.set('sort', 'desc');
+  } else if (input.provider === 'github') {
+    params.set('state', state);
+    params.set('sort', 'updated');
+    params.set('direction', 'desc');
+  } else {
+    params.set('state', state);
+    params.set('sort', 'recentupdate');
   }
   const path =
-    input.provider === 'github'
-      ? `${githubRepoPath(repository.fullName)}/pulls?${params}`
-      : `/projects/${encodeURIComponent(repository.externalId)}/merge_requests?${params}`;
+    input.provider === 'gitlab'
+      ? `/projects/${encodeURIComponent(repository.externalId)}/merge_requests?${params}`
+      : `${githubRepoPath(repository.fullName)}/pulls?${params}`;
   const response = await providerRequest(input, path);
   const body: unknown = await response.json();
   if (!Array.isArray(body))
     throw new HttpError(502, `${input.provider} returned an invalid pull request list`);
-  const normalize = input.provider === 'github' ? githubPullRequest : gitlabPullRequest;
+  const normalize = input.provider === 'gitlab' ? gitlabPullRequest : githubPullRequest;
   const pullRequests = body
     .map(normalize)
     .filter((pullRequest): pullRequest is ProviderPullRequest => pullRequest !== null);
-  const providerNext = response.headers.get('x-next-page');
-  return {
-    pullRequests,
-    nextPage: providerNext
-      ? Number(providerNext) || null
-      : body.length === perPage
-        ? page + 1
-        : null,
-  };
+  return { pullRequests, nextPage: nextPageNumber(response, page, body.length, perPage) };
 }
 
 export async function getProviderPullRequest(
@@ -606,20 +639,21 @@ export async function getProviderPullRequest(
   ensureDevelopmentProvider(input.provider);
   const currentRepository = await getProviderRepository(input, repository.externalId);
   const path =
-    input.provider === 'github'
-      ? `${githubRepoPath(repository.fullName)}/pulls/${number}`
-      : `/projects/${encodeURIComponent(repository.externalId)}/merge_requests/${number}`;
+    input.provider === 'gitlab'
+      ? `/projects/${encodeURIComponent(repository.externalId)}/merge_requests/${number}`
+      : `${githubRepoPath(repository.fullName)}/pulls/${number}`;
   const response = await providerRequest(input, path);
   const body = record(await response.json());
   if (!body) throw new HttpError(502, `${input.provider} returned an invalid pull request`);
   const pullRequest =
-    input.provider === 'github' ? githubPullRequest(body) : gitlabPullRequest(body);
+    input.provider === 'gitlab' ? gitlabPullRequest(body) : githubPullRequest(body);
   if (!pullRequest) throw new HttpError(502, `${input.provider} returned an invalid pull request`);
 
+  // No CI status for Gitea and Forgejo: their webhooks are not subscribed to it either.
   let run: PipelineEvent | null = null;
   if (input.provider === 'gitlab') {
     run = gitlabPipeline(body.head_pipeline, currentRepository, pullRequest);
-  } else if (pullRequest.headSha) {
+  } else if (input.provider === 'github' && pullRequest.headSha) {
     try {
       const params = new URLSearchParams({ head_sha: pullRequest.headSha, per_page: '1' });
       const runsResponse = await providerRequest(
@@ -647,11 +681,14 @@ export async function listProviderBranches(
   ensureDevelopmentProvider(input.provider);
   const perPage = 100;
   const currentRepository = await getProviderRepository(input, repository.externalId);
-  const params = new URLSearchParams({ page: String(page), per_page: String(perPage) });
+  const params = new URLSearchParams({
+    page: String(page),
+    [pageSizeParam(input.provider)]: String(perPage),
+  });
   const path =
-    input.provider === 'github'
-      ? `${githubRepoPath(repository.fullName)}/branches?${params}`
-      : `/projects/${encodeURIComponent(repository.externalId)}/repository/branches?${params}`;
+    input.provider === 'gitlab'
+      ? `/projects/${encodeURIComponent(repository.externalId)}/repository/branches?${params}`
+      : `${githubRepoPath(repository.fullName)}/branches?${params}`;
   const response = await providerRequest(input, path);
   const body: unknown = await response.json();
   if (!Array.isArray(body))
@@ -659,16 +696,18 @@ export async function listProviderBranches(
   const branches = body
     .map((item) => text(record(item)?.name))
     .filter((name): name is string => name !== null);
-  const providerNext = response.headers.get('x-next-page');
   return {
     branches,
     defaultBranch: currentRepository.defaultBranch ?? null,
-    nextPage: providerNext
-      ? Number(providerNext) || null
-      : body.length === perPage
-        ? page + 1
-        : null,
+    nextPage: nextPageNumber(response, page, body.length, perPage),
   };
+}
+
+function draftTitle(provider: DevelopmentProvider, title: string): string {
+  if (provider === 'github') return title;
+  if (provider === 'gitlab') return /^(draft:|wip:)/i.test(title) ? title : `Draft: ${title}`;
+  // Gitea and Forgejo have no draft flag on create; these are their default draft prefixes.
+  return /^(wip:|\[wip\])/i.test(title) ? title : `WIP: ${title}`;
 }
 
 export async function createProviderPullRequest(
@@ -678,29 +717,27 @@ export async function createProviderPullRequest(
 ): Promise<ProviderPullRequestDetails> {
   ensureDevelopmentProvider(input.provider);
   const path =
-    input.provider === 'github'
-      ? `${githubRepoPath(repository.fullName)}/pulls`
-      : `/projects/${encodeURIComponent(repository.externalId)}/merge_requests`;
-  const title =
-    input.provider === 'gitlab' && values.draft && !/^(draft:|wip:)/i.test(values.title)
-      ? `Draft: ${values.title}`
-      : values.title;
+    input.provider === 'gitlab'
+      ? `/projects/${encodeURIComponent(repository.externalId)}/merge_requests`
+      : `${githubRepoPath(repository.fullName)}/pulls`;
+  const title = values.draft ? draftTitle(input.provider, values.title) : values.title;
   const body =
-    input.provider === 'github'
+    input.provider === 'gitlab'
       ? {
-          title,
-          body: values.description,
-          head: values.sourceBranch,
-          base: values.targetBranch,
-          draft: values.draft,
-          maintainer_can_modify: true,
-        }
-      : {
           title,
           description: values.description,
           source_branch: values.sourceBranch,
           target_branch: values.targetBranch,
           allow_collaboration: true,
+        }
+      : {
+          title,
+          body: values.description,
+          head: values.sourceBranch,
+          base: values.targetBranch,
+          ...(input.provider === 'github'
+            ? { draft: values.draft, maintainer_can_modify: true }
+            : {}),
         };
   const response = await providerRequest(input, path, {
     method: 'POST',
@@ -709,7 +746,7 @@ export async function createProviderPullRequest(
   const created = record(await response.json());
   if (!created) throw new HttpError(502, `${input.provider} returned an invalid pull request`);
   const pullRequest =
-    input.provider === 'github' ? githubPullRequest(created) : gitlabPullRequest(created);
+    input.provider === 'gitlab' ? gitlabPullRequest(created) : githubPullRequest(created);
   if (!pullRequest) throw new HttpError(502, `${input.provider} returned an invalid pull request`);
   return {
     pullRequest,
@@ -721,27 +758,38 @@ export async function createProviderPullRequest(
   };
 }
 
-export async function installProviderWebhook(
-  input: ProviderConnectionInput,
+interface ProviderWebhookApi {
+  hooksPath: string;
+  listQuery: string;
+  updateMethod: 'PATCH' | 'PUT';
+  hooks(body: unknown): unknown[];
+  url(hook: Record<string, unknown> | null): string | null;
+  id(hook: Record<string, unknown> | null): string | null;
+  body(create: boolean): unknown;
+}
+
+function numericId(hook: Record<string, unknown> | null): string | null {
+  const id = hook?.id;
+  return typeof id === 'number' || typeof id === 'string' ? String(id) : null;
+}
+
+function providerWebhookApi(
+  provider: GitProvider,
   repository: ProviderRepository,
   payloadUrl: string,
   secret: string,
-): Promise<string> {
-  if (input.provider === 'gitlab') {
-    const hooksPath = `/projects/${encodeURIComponent(repository.externalId)}/hooks`;
-    const hooksResponse = await providerRequest(input, `${hooksPath}?per_page=100`);
-    const hooks: unknown = await hooksResponse.json();
-    const existing = Array.isArray(hooks)
-      ? hooks.map(record).find((hook) => text(hook?.url) === payloadUrl)
-      : undefined;
-    const existingId = existing?.id;
-    const path =
-      typeof existingId === 'number' || typeof existingId === 'string'
-        ? `${hooksPath}/${encodeURIComponent(String(existingId))}`
-        : hooksPath;
-    const response = await providerRequest(input, path, {
-      method: existing ? 'PUT' : 'POST',
-      body: JSON.stringify({
+): ProviderWebhookApi {
+  const arrayBody = (body: unknown) => (Array.isArray(body) ? body : []);
+  const configUrl = (hook: Record<string, unknown> | null) => text(record(hook?.config)?.url);
+  if (provider === 'gitlab') {
+    return {
+      hooksPath: `/projects/${encodeURIComponent(repository.externalId)}/hooks`,
+      listQuery: '?per_page=100',
+      updateMethod: 'PUT',
+      hooks: arrayBody,
+      url: (hook) => text(hook?.url),
+      id: numericId,
+      body: () => ({
         url: payloadUrl,
         token: secret,
         merge_requests_events: true,
@@ -749,52 +797,33 @@ export async function installProviderWebhook(
         push_events: true,
         enable_ssl_verification: true,
       }),
-    });
-    const id = record(await response.json())?.id;
-    if (typeof id !== 'number' && typeof id !== 'string')
-      throw new HttpError(502, 'GitLab returned an invalid webhook');
-    return String(id);
+    };
   }
-
-  if (input.provider === 'gitea' || input.provider === 'forgejo') {
-    const hooksPath = `${githubRepoPath(repository.fullName)}/hooks`;
-    const hooksResponse = await providerRequest(input, `${hooksPath}?limit=100`);
-    const hooks: unknown = await hooksResponse.json();
-    const existing = Array.isArray(hooks)
-      ? hooks.map(record).find((hook) => text(record(hook?.config)?.url) === payloadUrl)
-      : undefined;
-    const existingId = existing?.id;
-    const path =
-      typeof existingId === 'number' || typeof existingId === 'string'
-        ? `${hooksPath}/${encodeURIComponent(String(existingId))}`
-        : hooksPath;
-    const response = await providerRequest(input, path, {
-      method: existing ? 'PATCH' : 'POST',
-      body: JSON.stringify({
-        ...(existing ? {} : { type: 'gitea' }),
+  if (provider === 'gitea' || provider === 'forgejo') {
+    return {
+      hooksPath: `${githubRepoPath(repository.fullName)}/hooks`,
+      listQuery: '?limit=100',
+      updateMethod: 'PATCH',
+      hooks: arrayBody,
+      url: configUrl,
+      id: numericId,
+      body: (create) => ({
+        ...(create ? { type: 'gitea' } : {}),
         active: true,
         events: ['pull_request', 'create', 'delete'],
         config: { url: payloadUrl, content_type: 'json', secret },
       }),
-    });
-    const id = record(await response.json())?.id;
-    if (typeof id !== 'number' && typeof id !== 'string')
-      throw new HttpError(502, `${input.provider} returned an invalid webhook`);
-    return String(id);
+    };
   }
-
-  if (input.provider === 'bitbucket') {
-    const hooksPath = `${bitbucketRepoPath(repository.fullName)}/hooks`;
-    const hooksResponse = await providerRequest(input, `${hooksPath}?pagelen=100`);
-    const hooks = record(await hooksResponse.json())?.values;
-    const existing = Array.isArray(hooks)
-      ? hooks.map(record).find((hook) => text(hook?.url) === payloadUrl)
-      : undefined;
-    const existingId = text(existing?.uuid);
-    const path = existingId ? `${hooksPath}/${encodeURIComponent(existingId)}` : hooksPath;
-    const response = await providerRequest(input, path, {
-      method: existing ? 'PUT' : 'POST',
-      body: JSON.stringify({
+  if (provider === 'bitbucket') {
+    return {
+      hooksPath: `${bitbucketRepoPath(repository.fullName)}/hooks`,
+      listQuery: '?pagelen=100',
+      updateMethod: 'PUT',
+      hooks: (body) => arrayBody(record(body)?.values),
+      url: (hook) => text(hook?.url),
+      id: (hook) => text(hook?.uuid),
+      body: () => ({
         description: "It's a Plan",
         url: payloadUrl,
         active: true,
@@ -808,36 +837,61 @@ export async function installProviderWebhook(
           'repo:branch_deleted',
         ],
       }),
-    });
-    const id = text(record(await response.json())?.uuid);
-    if (!id) throw new HttpError(502, 'Bitbucket returned an invalid webhook');
-    return id;
+    };
   }
-
-  const hooksPath = `${githubRepoPath(repository.fullName)}/hooks`;
-  const hooksResponse = await providerRequest(input, `${hooksPath}?per_page=100`);
-  const hooks: unknown = await hooksResponse.json();
-  const existing = Array.isArray(hooks)
-    ? hooks.map(record).find((hook) => text(record(hook?.config)?.url) === payloadUrl)
-    : undefined;
-  const existingId = existing?.id;
-  const path =
-    typeof existingId === 'number' || typeof existingId === 'string'
-      ? `${hooksPath}/${encodeURIComponent(String(existingId))}`
-      : hooksPath;
-  const response = await providerRequest(input, path, {
-    method: existing ? 'PATCH' : 'POST',
-    body: JSON.stringify({
-      ...(existing ? {} : { name: 'web' }),
+  return {
+    hooksPath: `${githubRepoPath(repository.fullName)}/hooks`,
+    listQuery: '?per_page=100',
+    updateMethod: 'PATCH',
+    hooks: arrayBody,
+    url: configUrl,
+    id: numericId,
+    body: (create) => ({
+      ...(create ? { name: 'web' } : {}),
       active: true,
       events: ['pull_request', 'check_run', 'create', 'delete'],
       config: { url: payloadUrl, content_type: 'json', insecure_ssl: '0', secret },
     }),
+  };
+}
+
+// Updates the hook stored as `webhookExternalId` in place, whatever URL it has now.
+// Without a stored id (first install) it reuses a hook with this exact URL. A stored
+// hook the provider no longer has is created again.
+export async function installProviderWebhook(
+  input: ProviderConnectionInput,
+  repository: ProviderRepository,
+  payloadUrl: string,
+  secret: string,
+  webhookExternalId: string | null,
+): Promise<string> {
+  const api = providerWebhookApi(input.provider, repository, payloadUrl, secret);
+  let existingId = webhookExternalId;
+  if (existingId === null) {
+    const hooksResponse = await providerRequest(input, `${api.hooksPath}${api.listQuery}`);
+    const existing = api
+      .hooks(await hooksResponse.json())
+      .map(record)
+      .find((hook) => api.url(hook) === payloadUrl);
+    existingId = existing ? api.id(existing) : null;
+  }
+  let response: Response | null = null;
+  if (existingId !== null) {
+    response = await providerRequest(input, `${api.hooksPath}/${encodeURIComponent(existingId)}`, {
+      method: api.updateMethod,
+      body: JSON.stringify(api.body(false)),
+      allowMissing: true,
+    });
+    if (response.status === 404) response = null;
+  }
+  response ??= await providerRequest(input, api.hooksPath, {
+    method: 'POST',
+    body: JSON.stringify(api.body(true)),
   });
-  const id = record(await response.json())?.id;
-  if (typeof id !== 'number' && typeof id !== 'string')
-    throw new HttpError(502, 'GitHub returned an invalid webhook');
-  return String(id);
+  const id = api.id(record(await response.json()));
+  if (!id)
+    throw new HttpError(502, `${PROVIDER_LABEL[input.provider]} returned an invalid webhook`);
+  return id;
 }
 
 export async function deleteProviderWebhook(

@@ -38,7 +38,7 @@ export function BulkActionBar({ project }: { project: ProjectDetail }) {
   // (open) ones only while selection is active, and only while the project shows the
   // Initiatives section (with none loaded the picker is left out).
   const initiativesKey =
-    selection.isSelecting && project.project.initiativesEnabled ? project.project.key : null;
+    selection.isSelecting && project.project.initiativesEnabled ? project.project.ref : null;
   const { data } = useInitiativeOptionsQuery(initiativesKey);
   const initiatives = data ?? [];
 
@@ -57,11 +57,11 @@ export function BulkActionBar({ project }: { project: ProjectDetail }) {
       <div className="pointer-events-none fixed inset-x-0 bottom-6 z-50 flex justify-center">
         <div
           className={cn(
-            'pointer-events-auto flex items-center gap-1 rounded-lg border bg-popover p-1 pl-3 shadow-lg',
+            'pointer-events-auto flex items-center gap-1 rounded-lg border bg-popover p-1 ps-3 shadow-lg',
             disabled && 'opacity-70',
           )}
         >
-          <span className="pr-1 text-sm font-medium whitespace-nowrap">
+          <span className="pe-1 text-sm font-medium whitespace-nowrap">
             {t('selected', { count: ids.length })}
           </span>
 
@@ -254,7 +254,7 @@ export function BulkActionBar({ project }: { project: ProjectDetail }) {
 
       {confirming && (
         <BulkRemovalDialog
-          projectKey={project.project.key}
+          projectKey={project.project.ref}
           action={confirming}
           ids={ids}
           subtaskCount={subtasks}
