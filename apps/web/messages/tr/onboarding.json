@@ -37,7 +37,7 @@
     },
     "schedules": {
       "title": "Ajanları zamanlamayla çalıştırın",
-      "body": "Bir ajanı belirli bir saatte ya da bir iş bir duruma girdiğinde başlatın. Pro ayrıca bir iş oluşturulduğunda veya atandığında, bir etiket eklendiğinde ya da bir yorum yazıldığında da başlatır, yalnızca bir filtreye uyan işler için."
+      "body": "Bir ajanı belirli bir saatte ya da bir iş bir duruma girdiğinde başlatın."
     },
     "workflows": {
       "name": "Akışlar",

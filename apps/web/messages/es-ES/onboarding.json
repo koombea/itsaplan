@@ -37,7 +37,7 @@
     },
     "schedules": {
       "title": "Ejecuta agentes según una programación",
-      "body": "Inicia un agente a una hora fija o cuando un ticket entra en un estado. Pro también lo inicia cuando se crea o se asigna un ticket, se añade una etiqueta o se publica un comentario, solo para los tickets que cumplen un filtro."
+      "body": "Inicia un agente a una hora fija o cuando un ticket entra en un estado."
     },
     "workflows": {
       "name": "Flujos",

@@ -37,7 +37,7 @@
     },
     "schedules": {
       "title": "Jalankan agen sesuai jadwal",
-      "body": "Mulai agen pada waktu yang ditentukan atau saat issue masuk ke suatu status. Pro juga memulainya saat issue dibuat atau ditugaskan, label ditambahkan, atau komentar diposting, hanya untuk issue yang cocok dengan filter."
+      "body": "Mulai agen pada waktu yang ditentukan atau saat issue masuk ke suatu status."
     },
     "workflows": {
       "name": "Alur",

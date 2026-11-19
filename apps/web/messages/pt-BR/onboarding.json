@@ -37,7 +37,7 @@
     },
     "schedules": {
       "title": "Execute agentes por agendamento",
-      "body": "Inicie um agente em um horário definido ou quando uma issue entra em um estado. O Pro também inicia um quando uma issue é criada ou atribuída, uma etiqueta é adicionada ou um comentário é publicado, só para as issues que atendem a um filtro."
+      "body": "Inicie um agente em um horário definido ou quando uma issue entra em um estado."
     },
     "workflows": {
       "name": "Fluxos",

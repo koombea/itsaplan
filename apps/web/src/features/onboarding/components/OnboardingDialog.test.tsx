@@ -69,6 +69,35 @@ it('welcomes a person to the product under its branded name', async () => {
   assert.equal(title?.textContent, 'Welcome to Acme Tracker');
 });
 
+// This instance is its own edition: the tour presents no feature of another one.
+it('shows no slide of another edition and no link to it', async () => {
+  const { default: OnboardingDialog } = await import('./OnboardingDialog');
+  await act(async () =>
+    root.render(
+      <NextIntlClientProvider locale="en" messages={{ common, onboarding }} timeZone="UTC">
+        <BrandingProvider branding={DEFAULT_BRANDING}>
+          <OnboardingDialog onClose={() => {}} />
+        </BrandingProvider>
+      </NextIntlClientProvider>,
+    ),
+  );
+
+  const badges = [...document.querySelectorAll('span')].filter((s) => s.textContent === 'PRO');
+  assert.equal(badges.length, 0);
+  assert.equal(document.querySelector('a[href*="/pro"]'), null);
+  assert.doesNotMatch(document.body.textContent ?? '', new RegExp(onboarding.proNote));
+});
+
+it('describes the schedules without what another edition adds, in every language', () => {
+  const messagesDir = new URL('../../../../messages/', import.meta.url);
+  for (const locale of readdirSync(messagesDir)) {
+    const { slides } = JSON.parse(
+      readFileSync(new URL(`${locale}/onboarding.json`, messagesDir), 'utf8'),
+    ) as { slides: { schedules: { body: string } } };
+    assert.doesNotMatch(slides.schedules.body, /\bPro\b/, locale);
+  }
+});
+
 // The tour's title names the product, which an instance renames with its branding.
 it('names the product through the branded name in every language', () => {
   const messagesDir = new URL('../../../../messages/', import.meta.url);
