@@ -3,13 +3,15 @@
 import { useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { X } from 'lucide-react';
-import { proEdition } from '@/cloud';
 import { Dialog, DialogClose, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { useBranding } from '@/context/brandingContext';
 import { flyToMark } from '../utils/flyToMark';
-import { ONBOARDING_SLIDES as slides } from '../utils/slides';
+import { ONBOARDING_SLIDES } from '../utils/slides';
 import OnboardingFooter from './OnboardingFooter';
 import OnboardingSlide from './OnboardingSlide';
+
+// This instance is its own edition, so the tour leaves out the features of another one.
+const slides = ONBOARDING_SLIDES.filter((slide) => !slide.pro);
 
 // The slides sit side by side in a strip that scrolls and snaps, so a swipe moves them as
 // well as the buttons do.
@@ -59,13 +61,7 @@ export default function OnboardingDialog({ onClose }: { onClose: () => void }) {
             <OnboardingSlide key={slide.id} slide={slide} inert={i !== index} />
           ))}
         </div>
-        <OnboardingFooter
-          count={slides.length}
-          index={index}
-          proFeature={proEdition ? undefined : slides[index]?.proFeature}
-          onGo={go}
-          onDone={close}
-        />
+        <OnboardingFooter count={slides.length} index={index} onGo={go} onDone={close} />
         <DialogClose className="absolute end-3 top-3 inline-flex size-8 items-center justify-center rounded-lg bg-background/70 text-foreground backdrop-blur-sm transition-colors hover:bg-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-hidden">
           <X className="size-4" />
           <span className="sr-only">{tCommon('close')}</span>

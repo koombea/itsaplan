@@ -37,7 +37,7 @@
     },
     "schedules": {
       "title": "Exécutez des agents selon une planification",
-      "body": "Lancez un agent à heure fixe ou quand un ticket entre dans un état. Pro le lance aussi quand un ticket est créé ou assigné, qu'une étiquette est ajoutée ou qu'un commentaire est publié, uniquement pour les tickets qui correspondent à un filtre."
+      "body": "Lancez un agent à heure fixe ou quand un ticket entre dans un état."
     },
     "workflows": {
       "name": "Flux",

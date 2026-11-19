@@ -37,7 +37,7 @@
     },
     "schedules": {
       "title": "Run agents on a schedule",
-      "body": "Start an agent at a set time or when an issue enters a state. Pro also starts one when an issue is created or assigned, a label is added or a comment is posted, only for the issues that match a filter."
+      "body": "Start an agent at a set time or when an issue enters a state."
     },
     "workflows": {
       "name": "Workflows",
