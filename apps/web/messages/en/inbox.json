@@ -10,12 +10,14 @@
   "showSnoozed": "Show snoozed",
   "markAllRead": "Mark all as read",
   "deleteAllRead": "Delete all read",
-  "deleteAllReadCompleted": "Delete all read for completed issues",
+  "deleteAllCompleted": "Delete for completed issues",
+  "deleteAllCompletedDescription": "This deletes the notifications for completed or canceled issues that match the current filters, including unread ones. This cannot be undone.",
   "types": {
     "assigned": "Assigned",
     "mentioned": "Mentioned",
     "commented": "Commented",
-    "state_changed": "Status changed"
+    "state_changed": "Status changed",
+    "reacted": "Reacted"
   },
   "actions": {
     "markRead": "Mark as read",
@@ -32,6 +34,7 @@
     "mentioned": "{who} mentioned you",
     "commented": "{who} commented",
     "stateChanged": "{who} changed the status from {from} to {to}",
-    "stateChangedPlain": "{who} changed the status"
+    "stateChangedPlain": "{who} changed the status",
+    "reacted": "{who} reacted to your comment with {emoji}"
   }
 }

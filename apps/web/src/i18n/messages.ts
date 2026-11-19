@@ -1,4 +1,5 @@
 import account from '../../messages/en/account.json';
+import agentAnalytics from '../../messages/en/agentAnalytics.json';
 import aiChat from '../../messages/en/aiChat.json';
 import apiKeys from '../../messages/en/apiKeys.json';
 import auth from '../../messages/en/auth.json';
@@ -20,6 +21,7 @@ import meta from '../../messages/en/meta.json';
 import nav from '../../messages/en/nav.json';
 import newProject from '../../messages/en/newProject.json';
 import notes from '../../messages/en/notes.json';
+import onboarding from '../../messages/en/onboarding.json';
 import palette from '../../messages/en/palette.json';
 import permissions from '../../messages/en/permissions.json';
 import projects from '../../messages/en/projects.json';
@@ -31,11 +33,13 @@ import updates from '../../messages/en/updates.json';
 import views from '../../messages/en/views.json';
 import whatsNew from '../../messages/en/whatsNew.json';
 import workItems from '../../messages/en/workItems.json';
+import { cloudMessages, loadCloudMessages } from '@/cloud';
 import { DEFAULT_LOCALE, type Locale } from './locales';
 
 // English is static: it is the fallback for every other language and the shape the
-// `t('…')` keys are typed against.
-const defaultMessages = {
+// `t('…')` keys are typed against. The hosted build's English is merged in, so its keys
+// are typed too.
+const coreMessages = {
   meta,
   auth,
   common,
@@ -67,29 +71,40 @@ const defaultMessages = {
   god,
   newProject,
   teams,
+  agentAnalytics,
   updates,
   whatsNew,
+  onboarding,
 };
 
-export type Messages = typeof defaultMessages;
+const NAMESPACES = Object.keys(coreMessages) as (keyof typeof coreMessages)[];
 
-const NAMESPACES = Object.keys(defaultMessages) as (keyof Messages)[];
+const defaultMessages = mergeMessages(coreMessages, cloudMessages) as typeof coreMessages &
+  typeof cloudMessages;
+
+export type Messages = typeof defaultMessages;
 
 export async function loadMessages(locale: Locale): Promise<Messages> {
   if (locale === DEFAULT_LOCALE) return defaultMessages;
 
-  const translated = await Promise.all(
-    NAMESPACES.map(async (ns) => [
-      ns,
-      (await import(`../../messages/${locale}/${ns}.json`)).default,
-    ]),
-  );
+  const [translated, cloud] = await Promise.all([
+    Promise.all(
+      NAMESPACES.map(async (ns) => [
+        ns,
+        (await import(`../../messages/${locale}/${ns}.json`)).default,
+      ]),
+    ),
+    loadCloudMessages(locale),
+  ]);
 
   // A key still untranslated renders its English text instead of the raw key path.
-  return mergeMessages(defaultMessages, Object.fromEntries(translated)) as Messages;
+  return mergeMessages(
+    defaultMessages,
+    mergeMessages(Object.fromEntries(translated), cloud),
+  ) as Messages;
 }
 
-type MessageTree = { [key: string]: string | MessageTree };
+export type MessageTree = { [key: string]: string | MessageTree };
 
 function mergeMessages(base: MessageTree, override: MessageTree): MessageTree {
   const result: MessageTree = { ...base };

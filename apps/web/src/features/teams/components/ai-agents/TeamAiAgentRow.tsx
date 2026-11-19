@@ -1,168 +1,106 @@
-import { History, MessageSquare, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
-import type { AiAgent } from '@/lib/api/endpoints/agents';
-import { AgentRunnerStatus } from '@/components/common/agent-chat/AgentRunnerStatus';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { TableCell, TableRow } from '@/components/ui/table';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { AGENT_KIND_ICON } from '../../utils/agentKindIcon';
-import { useAgentCan } from '../../context/agentSection';
-import { AgentMetaRow } from './AgentMetaRow';
-import { AgentTriggers } from './AgentTriggers';
+import { Check, Minus } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import type { AiAgent } from '@/lib/api/endpoints/agents';
+import { Switch } from '@/components/ui/switch';
+import { TableCell, TableRow } from '@/components/ui/table';
+import { useAgentCan } from '../../context/agentSection';
+import { AGENT_KIND_ICON } from '../../utils/agentKindIcon';
+import { AgentConfigSummary } from './AgentConfigSummary';
+import { AgentProjectKeys } from './AgentProjectKeys';
+import { AgentTriggers } from './AgentTriggers';
+import { TeamAiAgentMenu } from './TeamAiAgentMenu';
 
-// One agent as a table row: the Agent cell holds the name, @username, an icon for the
-// kind, and the projects the agent works in; the Configuration cell shows an
-// internal agent's meta line (model, capability/tool/skill counts) or an external
-// agent's runner presence and non-secret key prefix. Row actions
-// (history/chat/edit/delete) sit in the last cell; the key itself is managed in the
-// agent's sheet. `providerLabel` maps a provider key to its catalog label.
+const CELL = 'px-3 py-3 align-middle whitespace-normal';
+
+// One agent as a table row. A click on the row opens the agent's sheet; the other actions
+// sit in the menu of the last cell. `highlightProjects` are the project ids a filter
+// ticked, shown first. `providerLabel` maps a provider key to its catalog label.
 export function TeamAiAgentRow({
   agent,
   providerLabel,
+  highlightProjects = [],
   onChat,
   onRuns,
   onEdit,
   onDelete,
+  joinsNewProjects,
+  joinsNewProjectsPending,
+  onJoinsNewProjectsChange,
 }: {
   agent: AiAgent;
   providerLabel: (key: string) => string;
+  highlightProjects?: string[];
   onChat: () => void;
   onRuns: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  joinsNewProjects: boolean;
+  joinsNewProjectsPending: boolean;
+  // Undefined for a member who cannot change the team's defaults.
+  onJoinsNewProjectsChange?: (on: boolean) => void;
 }) {
   const t = useTranslations('teams.agents');
   const can = useAgentCan();
   const canHistory = can('read');
   const KindIcon = AGENT_KIND_ICON[agent.kind];
-  const hasMenu = canHistory || can('delete');
+  const kindLabel = t(`kindLabel.${agent.kind}`);
+  const canEdit = can('edit') && agent.canManage;
+  const canDelete = can('delete') && agent.canManage;
 
   return (
-    <TableRow className="group/item">
-      <TableCell className="px-3 py-3 align-middle whitespace-normal">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <div className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground">
-            <KindIcon className="size-4" />
-          </div>
-          <div className="flex min-w-0 flex-col gap-1">
-            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="truncate text-sm font-medium">{agent.name}</span>
-              <span className="truncate text-xs text-muted-foreground">@{agent.username}</span>
-            </div>
-            <div className="flex min-w-0 flex-wrap items-center gap-1">
-              {agent.projects.length === 0 ? (
-                <span className="text-xs text-muted-foreground/80">{t('noProjectsShort')}</span>
-              ) : (
-                agent.projects.map((project) => (
-                  <Badge key={project.id} variant="outline" className="shrink-0 font-mono text-xs">
-                    {project.key}
-                  </Badge>
-                ))
-              )}
-            </div>
-          </div>
+    <TableRow
+      className={`group/item ${canEdit ? 'cursor-pointer' : ''}`}
+      onClick={canEdit ? onEdit : undefined}
+    >
+      <TableCell className={CELL}>
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="flex min-w-0 items-center gap-1.5 text-sm font-medium">
+            <span title={kindLabel} className="shrink-0 text-muted-foreground">
+              <KindIcon className="size-3.5" aria-hidden />
+            </span>
+            <span className="sr-only">{kindLabel}</span>
+            <span className="truncate">{agent.name}</span>
+          </span>
+          <span className="truncate text-xs text-muted-foreground">@{agent.username}</span>
         </div>
       </TableCell>
-      <TableCell className="px-3 py-3 align-middle whitespace-normal">
+      {/* The popover is portaled but its clicks still bubble to the row through React. */}
+      <TableCell className={CELL} onClick={(e) => e.stopPropagation()}>
+        <AgentProjectKeys
+          projects={agent.projects}
+          highlight={highlightProjects}
+          onEdit={canEdit ? onEdit : undefined}
+        />
+      </TableCell>
+      <TableCell className={CELL}>
         <AgentTriggers agent={agent} />
       </TableCell>
-      <TableCell className="px-3 py-3 align-middle whitespace-normal">
-        {agent.kind === 'internal' ? (
-          <AgentMetaRow agent={agent} providerLabel={providerLabel} />
+      <TableCell className={CELL}>
+        <AgentConfigSummary agent={agent} providerLabel={providerLabel} />
+      </TableCell>
+      <TableCell className="px-3 py-3 align-middle" onClick={(e) => e.stopPropagation()}>
+        {onJoinsNewProjectsChange ? (
+          <Switch
+            checked={joinsNewProjects}
+            disabled={joinsNewProjectsPending}
+            onCheckedChange={onJoinsNewProjectsChange}
+            aria-label={t('projectDefaultAria', { agent: agent.name })}
+          />
+        ) : joinsNewProjects ? (
+          <Check className="size-4 text-green-500" aria-label={t('projectDefaultOn')} />
         ) : (
-          <div className="flex flex-col gap-1">
-            <AgentRunnerStatus agent={agent} />
-            <span className="text-xs text-muted-foreground">
-              {agent.apiKeyStart ? t('apiKeyValue', { start: agent.apiKeyStart }) : t('apiKey')}
-            </span>
-          </div>
+          <Minus className="size-4 text-muted-foreground" aria-label={t('projectDefaultOff')} />
         )}
       </TableCell>
-      <TableCell className="px-3 py-2 align-middle">
-        <div className="flex items-center justify-end gap-1">
-          {canHistory && (
-            <IconButton title={t('runHistory')} onClick={onRuns}>
-              <History className="size-4" />
-            </IconButton>
-          )}
-          {can('edit') && (
-            <IconButton title={t('edit')} onClick={onEdit}>
-              <Pencil className="size-4" />
-            </IconButton>
-          )}
-          {hasMenu && (
-            <DropdownMenu>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="size-8 text-muted-foreground hover:text-foreground"
-                    >
-                      <MoreHorizontal className="size-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                </TooltipTrigger>
-                <TooltipContent>{t('moreActions')}</TooltipContent>
-              </Tooltip>
-              <DropdownMenuContent align="end">
-                {canHistory && (
-                  <DropdownMenuItem className="min-h-11 sm:min-h-8" onSelect={onChat}>
-                    <MessageSquare />
-                    {t('testChat')}
-                  </DropdownMenuItem>
-                )}
-                {can('delete') && canHistory && <DropdownMenuSeparator />}
-                {can('delete') && (
-                  <DropdownMenuItem
-                    className="min-h-11 sm:min-h-8"
-                    variant="destructive"
-                    onSelect={onDelete}
-                  >
-                    <Trash2 />
-                    {t('delete')}
-                  </DropdownMenuItem>
-                )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-        </div>
+      {/* Menu items are portaled but their clicks still bubble to the row through React. */}
+      <TableCell className="px-3 py-2 align-middle" onClick={(e) => e.stopPropagation()}>
+        <TeamAiAgentMenu
+          onEdit={canEdit ? onEdit : undefined}
+          onRuns={canHistory ? onRuns : undefined}
+          onChat={canHistory && agent.chatEnabled ? onChat : undefined}
+          onDelete={canDelete ? onDelete : undefined}
+        />
       </TableCell>
     </TableRow>
-  );
-}
-
-function IconButton({
-  title,
-  onClick,
-  children,
-}: {
-  title: string;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-8 text-muted-foreground hover:text-foreground"
-          onClick={onClick}
-        >
-          {children}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{title}</TooltipContent>
-    </Tooltip>
   );
 }

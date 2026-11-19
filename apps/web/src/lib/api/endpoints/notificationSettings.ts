@@ -10,6 +10,7 @@ export interface NotificationEventToggles {
   mentioned: boolean;
   commented: boolean;
   state_changed: boolean;
+  reacted: boolean;
 }
 
 // The provider credentials as read from the API: secrets are never returned, only a
@@ -30,6 +31,7 @@ export interface NotificationSettings {
     timeout: number | null;
   };
   resend: { enabled: boolean; hasApiKey: boolean };
+  from: string;
   telegram: { enabled: boolean; hasBotToken: boolean };
 }
 
@@ -47,6 +49,7 @@ export interface NotificationSettingsPatch {
     timeout: number | null;
   };
   resend?: { enabled: boolean; apiKey?: string };
+  from?: string;
   telegram?: { enabled: boolean; botToken?: string };
 }
 

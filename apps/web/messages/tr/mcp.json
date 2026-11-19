@@ -1,0 +1,59 @@
+{
+  "title": "MCP Sunucusu",
+  "description": "Yapay zekâ ajanlarını Model Context Protocol üzerinden bu projeye bağlayın. Ajan, yalnızca API anahtarının izin verdiği verileri görür.",
+  "disabled": "Devre dışı",
+  "offForTeam": "{team} takımı için MCP kapalı.",
+  "offForProject": "{team} takımında MCP açık, ancak bu proje için kapalı.",
+  "openTeamSettings": "Takımın MCP ayarlarını aç",
+  "askManager": "Açması için bir takım sahibine veya yöneticisine danışın:",
+  "keyHint": "<link>API anahtarları</link> sayfasından bir anahtar oluşturun, ardından kod parçacığındaki <code>{apiKey}</code> değerini değiştirin.",
+  "endpoint": "MCP uç noktası",
+  "clientTabsAria": "İstemci",
+  "addToFile": "<code>{file}</code> dosyasına ekleyin",
+  "notes": {
+    "claudeCode": "Bunu terminalinizde çalıştırın.",
+    "vscode": "GitHub Copilot gerektirir.",
+    "claudeDesktop": "Claude Desktop uzak sunuculara mcp-remote köprüsü üzerinden bağlanır. Node.js gerektirir.",
+    "other": "Streamable HTTP üzerinden MCP destekleyen tüm istemciler çalışır. Uç noktaya yönlendirin ve Authorization: Bearer {apiKey} başlığını gönderin."
+  },
+  "clients": {
+    "other": "Diğer"
+  },
+  "oauth": {
+    "configuration": "Nasıl bağlanılır",
+    "methodTabsAria": "Bağlantı yöntemi",
+    "method": "OAuth",
+    "personalKey": "API anahtarı",
+    "description": "Bunu ChatGPT veya Claude gibi OAuth destekleyen herhangi bir MCP istemcisi için kullanın. {app} hesabınızla giriş yaparsınız; istemciye hiçbir zaman API anahtarı iletilmez.",
+    "discovery": "OAuth keşfi",
+    "steps": {
+      "add": "İstemcinize bir MCP uygulaması ekleyin.",
+      "paste": "MCP uç noktasını yapıştırın.",
+      "choose": "İstemci giriş yöntemi sorduğunda OAuth'u seçin.",
+      "signIn": "{app}'a giriş yapın ve erişimi onaylayın."
+    },
+    "security": "OAuth; PKCE (S256), dinamik istemci kaydı ve {app} hesabınızla sınırlı erişim belirteçleri kullanır.",
+    "consent": {
+      "title": "{client} için hesabınıza erişim izni verilsin mi?",
+      "titleUnnamed": "Adı olmayan bir uygulamaya hesabınıza erişim izni verilsin mi?",
+      "actsAs": "İzin verdiğinizde uygulama sizin adınıza işlem yapar:",
+      "canSee": "Tüm takımlarınızda görebildiğiniz her şeyi görür",
+      "canChange": "Yapabildiğiniz her şeyi oluşturur, değiştirir ve siler",
+      "keepsAccess": "Hesap › Güvenlik bölümünde bağlantısını kesene kadar erişimi sürer",
+      "account": "Hesap",
+      "app": "Uygulama",
+      "thisComputer": "Bu bilgisayarda",
+      "named": "“{client}” adını uygulama kendisi seçti. Yalnızca bu bağlantıyı siz başlattıysanız izin verin.",
+      "unnamed": "Uygulama bir ad göndermedi. Yalnızca bu bağlantıyı siz başlattıysanız izin verin.",
+      "deny": "İzin verme",
+      "allow": "İzin ver",
+      "allowing": "İzin veriliyor…",
+      "denying": "Gönderiliyor…",
+      "expired": "Bu isteğin 10 dakikalık süresi doldu. Bağlantıyı uygulamada yeniden başlatın.",
+      "failed": "Yanıtınız iletilemedi. Yeniden deneyin.",
+      "incompleteTitle": "Bu bağlantı adresi eksik",
+      "incompleteBody": "Bağlantıyı uygulamada yeniden başlatın.",
+      "brandSubtitle": "Claude ve ChatGPT gibi yapay zekâ uygulamalarını hesabınıza bağlayın."
+    }
+  }
+}

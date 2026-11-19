@@ -1,7 +1,10 @@
 import { t } from 'elysia';
+import { MAX_SUBTASK_DEPTH } from '@repo/db';
+import { agentExecutionState } from '#modules/agents/model';
 import { ActivityPayloadResponse } from '#shared/activity';
 import { DevelopmentLinkResponse } from '#modules/git/model';
-import { isoDate } from '#shared/schemas';
+import { AgentTraceDetailResponse } from '#modules/agents/core/model';
+import { instantQuery, isoDate } from '#shared/schemas';
 
 // Ceiling of every markdown text written on an issue: the description, a comment
 // and a custom field value. Each of them is scanned for mentions.
@@ -40,7 +43,12 @@ export const createIssuePullRequestBody = t.Object({
 
 export const DevelopmentRepositoryResponse = t.Object({
   id: t.Number(),
-  provider: t.Union([t.Literal('github'), t.Literal('gitlab')]),
+  provider: t.Union([
+    t.Literal('github'),
+    t.Literal('gitlab'),
+    t.Literal('gitea'),
+    t.Literal('forgejo'),
+  ]),
   fullName: t.String(),
   webUrl: t.String(),
 });
@@ -117,6 +125,7 @@ export const IssueResponse = t.Object({
   statusSince: t.String(),
   shareToken: t.Nullable(t.String()),
   shareExtended: t.Boolean(),
+  shareExpiresAt: t.Nullable(t.String()),
   labelIds: t.Array(t.Number()),
   fieldValues: t.Array(IssueFieldValueEntry),
 });
@@ -144,6 +153,15 @@ export const IssueRefResponse = t.Object({
   archived: t.Boolean(),
 });
 
+export const SubtreeIssueResponse = t.Composite([
+  IssueRefResponse,
+  t.Object({ parentId: t.Number() }),
+]);
+
+export const subtreeQuery = t.Object({
+  ids: t.String({ description: 'CSV of issue ids.' }),
+});
+
 // The kinds a relation is stored under (IssueLinkKind in links.ts).
 export const StoredLinkKind = t.Union([
   t.Literal('blocks'),
@@ -162,19 +180,19 @@ export const IssueLinkResponse = t.Object({
 
 // A relation as one of its two issues reads it (IssueLinkInputKind in links.ts). A
 // caller states this kind on create, and a board issue carries it.
-export const IssueLinkKindSchema = t.Union(
-  [
-    t.Literal('blocks'),
-    t.Literal('blocked_by'),
-    t.Literal('relates'),
-    t.Literal('duplicates'),
-    t.Literal('duplicated_by'),
-  ],
-  {
-    description:
-      'How one issue relates to the other: blocks, blocked_by, relates, duplicates, or duplicated_by.',
-  },
-);
+const issueLinkKind = (description?: string) =>
+  t.Union(
+    [
+      t.Literal('blocks'),
+      t.Literal('blocked_by'),
+      t.Literal('relates'),
+      t.Literal('duplicates'),
+      t.Literal('duplicated_by'),
+    ],
+    { description },
+  );
+
+export const IssueLinkKindSchema = issueLinkKind();
 
 // BoardIssueLink from links.ts: one relation on the issue carrying it, with the
 // other end as an id.
@@ -190,22 +208,23 @@ export const SubtaskModeSchema = t.Union(
   [t.Literal('cascade'), t.Literal('detach'), t.Literal('reassign')],
   {
     description:
-      "What happens to the issue's subtasks: 'cascade' removes them with it, 'detach' turns them into ordinary issues, 'reassign' moves them to newParentId.",
+      "'cascade' does the same to the subtasks. 'detach' makes " +
+      "them ordinary issues. 'reassign' moves them to newParentId.",
   },
 );
 
 export const NewParentIdSchema = t.Integer({
-  description: "Numeric id of the issue the subtasks move to. Required by 'reassign'.",
+  description: "Issue id the subtasks move to. Required for 'reassign'.",
 });
 
 // The estimate a create or an update sets. Time arrives as whole minutes: the
 // hours-and-minutes field is the UI's, and it sends what it parsed.
 export const EstimatePointsSchema = t.Nullable(
-  t.Number({ minimum: 0, description: 'Story point estimate, or null to clear it.' }),
+  t.Number({ minimum: 0, description: 'Story points, or null to clear.' }),
 );
 
 export const EstimateMinutesSchema = t.Nullable(
-  t.Integer({ minimum: 0, description: 'Time estimate in minutes, or null to clear it.' }),
+  t.Integer({ minimum: 0, description: 'Estimate in minutes, or null to clear.' }),
 );
 
 // IssueWatcherRow from watchers.ts: one member following the issue.
@@ -238,13 +257,11 @@ export const ChecklistResponse = t.Object({
 export const ChecklistTitleSchema = t.String({
   minLength: 1,
   maxLength: 200,
-  description: 'Title of the checklist.',
 });
 
 export const ChecklistItemContentSchema = t.String({
   minLength: 1,
   maxLength: 500,
-  description: 'Text of the checklist item.',
 });
 
 // A reorder sends the ids in their new order. The route ignores an id outside the
@@ -275,10 +292,10 @@ export const WorklogResponse = t.Object({
 export const createWorklogBody = t.Object({
   // Whole minutes: the hours-and-minutes field is the UI's, and it sends what it
   // parsed.
-  minutes: t.Integer({ minimum: 1, description: 'Time spent, in minutes.' }),
-  spentOn: isoDate("The day the work was done on, 'YYYY-MM-DD'. Not a day in the future."),
+  minutes: t.Integer({ minimum: 1 }),
+  spentOn: isoDate('Day of the work. Not in the future.'),
   note: t.Optional(
-    t.Nullable(t.String({ maxLength: 500, description: 'What the time went into. One line.' })),
+    t.Nullable(t.String({ maxLength: 500, description: 'What the time was for. One line.' })),
   ),
 });
 
@@ -294,6 +311,9 @@ export const IssueWithFieldsResponse = t.Composite([
     watchers: t.Array(IssueWatcherResponse),
     parent: t.Nullable(IssueRefResponse),
     subtasks: t.Array(IssueRefResponse),
+    ancestors: t.Array(IssueRefResponse, {
+      description: `The issues above this one, from the top level down to its parent; empty for an issue with no parent. Subtasks nest at most ${MAX_SUBTASK_DEPTH} levels deep, so an issue with ${MAX_SUBTASK_DEPTH - 1} ancestors cannot have subtasks.`,
+    }),
     checklists: t.Array(ChecklistResponse),
     development: t.Array(DevelopmentLinkResponse),
   }),
@@ -322,12 +342,37 @@ export const IssueSearchHitResponse = t.Object({
   initiativeId: t.Nullable(t.Number()),
   cycleId: t.Nullable(t.Number()),
   parentId: t.Nullable(t.Number()),
+  parent: t.Nullable(t.Object({ id: t.Number(), identifier: t.String(), title: t.String() })),
   assigneeUserId: t.Nullable(t.String()),
   delegateUserId: t.Nullable(t.String()),
   priority: t.Nullable(t.String()),
   dueDate: t.Nullable(t.String()),
+  estimatePoints: t.Nullable(t.Number()),
+  estimateMinutes: t.Nullable(t.Number()),
+  loggedMinutes: t.Number(),
   labelIds: t.Array(t.Number()),
   archived: t.Boolean(),
+  createdAt: t.String(),
+  updatedAt: t.String(),
+  statusSince: t.String(),
+  completedAt: t.Nullable(t.String()),
+});
+
+export const CrossProjectIssueHitResponse = t.Composite([
+  IssueSearchHitResponse,
+  t.Object({
+    projectId: t.Number(),
+    projectRef: t.String(),
+    projectKey: t.String(),
+    projectName: t.String(),
+    teamName: t.String(),
+  }),
+]);
+
+// CommentReactionRow from reactions.ts: one emoji on a comment and who reacted with it.
+export const CommentReactionResponse = t.Object({
+  emoji: t.String(),
+  users: t.Array(t.Object({ id: t.String(), name: t.String() })),
 });
 
 // FeedItemRow from activity.ts: one timeline entry (comment or change-log).
@@ -344,6 +389,7 @@ export const FeedItemResponse = t.Object({
   payload: ActivityPayloadResponse,
   createdAt: t.String(),
   editedAt: t.Nullable(t.String()),
+  reactions: t.Array(CommentReactionResponse),
 });
 
 export const FeedCursorResponse = t.Nullable(t.Object({ ts: t.String(), id: t.Number() }));
@@ -370,10 +416,29 @@ export const GroupedFeedPageResponse = t.Object({
   nextCursor: FeedCursorResponse,
 });
 
-// Both feed routes page the same way: a limit and the previous page's cursor.
+// Both feed routes page the same way: a limit and the previous page's cursor, over
+// the entries the filter keeps, in the order asked for.
 export const feedPageQuery = t.Object({
-  limit: t.Optional(t.Numeric({ description: 'Max items per page (1-100). Default 25.' })),
-  cursor: t.Optional(t.String({ description: 'nextCursor from the previous page, for paging.' })),
+  limit: t.Optional(t.Numeric({ description: '1-100. Default 25.' })),
+  cursor: t.Optional(t.String({ description: 'nextCursor from the previous page.' })),
+  filter: t.Optional(
+    t.Union([t.Literal('comments'), t.Literal('history'), t.Literal('worklog')], {
+      description: "'history' is the change log without time entries. Omit for all entries.",
+    }),
+  ),
+  order: t.Optional(
+    t.Union([t.Literal('desc'), t.Literal('asc')], {
+      description: "Default 'desc', newest first.",
+    }),
+  ),
+});
+
+// FeedCounts from activity.ts: how many entries each feed filter keeps.
+export const FeedCountsResponse = t.Object({
+  all: t.Number(),
+  comments: t.Number(),
+  history: t.Number(),
+  worklog: t.Number(),
 });
 
 // TimelineSegment from status-history.ts: one stretch the issue spent in a column.
@@ -401,66 +466,56 @@ export const IssueCycleResponse = t.Object({
 export const projectKeyParams = t.Object({ projectKey: t.String() });
 
 export const createIssueBody = t.Object({
-  typeId: t.Optional(
-    t.Nullable(t.Integer({ description: 'Issue type id, or null. From get_project.' })),
-  ),
+  typeId: t.Optional(t.Nullable(t.Integer({ description: 'Issue type id from get_project.' }))),
   initiativeId: t.Optional(
     t.Nullable(
       t.Integer({
-        description: 'Initiative id to link this issue to, or null. From list_initiatives.',
+        description: 'Initiative id from list_initiatives.',
       }),
     ),
   ),
   cycleId: t.Optional(
     t.Nullable(
       t.Integer({
-        description:
-          'Cycle id to plan this issue into, or null. From list_cycles; a completed cycle is rejected.',
+        description: 'Cycle id from list_cycles. A completed cycle is refused.',
       }),
     ),
   ),
   assigneeUserId: t.Optional(
     t.Nullable(
       t.String({
-        description:
-          "Assignee user id (a project member), or null. From get_project.assignees where kind is 'member'.",
+        description: "User id from get_project.assignees with kind 'member'.",
       }),
     ),
   ),
   delegateUserId: t.Optional(
     t.Nullable(
       t.String({
-        description:
-          "Delegate user id (an AI agent), or null. From get_project.assignees where kind is 'agent'.",
+        description: "Agent user id from get_project.assignees with kind 'agent'.",
       }),
     ),
   ),
-  columnId: t.Integer({ description: 'Target column (state) id. From get_project.columns.' }),
+  columnId: t.Integer({ description: 'Column id from get_project.columns.' }),
   parentId: t.Optional(
     t.Nullable(
       t.Integer({
-        description:
-          'Numeric id of the issue this one is a subtask of, or null. The parent must be in this project and must not be a subtask itself.',
+        description: `Parent issue id, to make this issue a subtask. The parent must be in this project. Subtasks nest at most ${MAX_SUBTASK_DEPTH} levels deep.`,
       }),
     ),
   ),
-  title: t.String({ minLength: 1, description: 'Issue title.' }),
+  title: t.String({ minLength: 1 }),
   description: t.Optional(
     t.String({
       maxLength: ISSUE_TEXT_LIMIT,
-      description: 'Issue description (plain text or markdown).',
+      description: 'Plain text or markdown.',
     }),
   ),
-  priority: t.Optional(
-    t.Nullable(t.String({ description: 'One of: urgent, high, medium, low. Or null.' })),
-  ),
+  priority: t.Optional(t.Nullable(t.String({ description: 'urgent, high, medium or low.' }))),
   estimatePoints: t.Optional(EstimatePointsSchema),
   estimateMinutes: t.Optional(EstimateMinutesSchema),
-  startDate: t.Optional(t.Nullable(isoDate("Start date 'YYYY-MM-DD', or null."))),
-  dueDate: t.Optional(t.Nullable(isoDate("Due date 'YYYY-MM-DD', or null."))),
-  labelIds: t.Optional(
-    t.Array(t.Integer(), { description: 'Label ids to attach. From get_project.labels.' }),
-  ),
+  startDate: t.Optional(t.Nullable(isoDate())),
+  dueDate: t.Optional(t.Nullable(isoDate())),
+  labelIds: t.Optional(t.Array(t.Integer(), { description: 'Label ids from get_project.labels.' })),
 });
 
 export const bulkUpdateIssuesBody = t.Object({
@@ -475,8 +530,8 @@ export const bulkUpdateIssuesBody = t.Object({
     priority: t.Optional(t.Nullable(t.String())),
     estimatePoints: t.Optional(EstimatePointsSchema),
     estimateMinutes: t.Optional(EstimateMinutesSchema),
-    startDate: t.Optional(t.Nullable(isoDate("Start date 'YYYY-MM-DD', or null."))),
-    dueDate: t.Optional(t.Nullable(isoDate("Due date 'YYYY-MM-DD', or null."))),
+    startDate: t.Optional(t.Nullable(isoDate())),
+    dueDate: t.Optional(t.Nullable(isoDate())),
   }),
 });
 
@@ -500,86 +555,142 @@ export const bulkDeleteIssuesBody = t.Object({
 export const searchIssuesQuery = t.Object({
   q: t.Optional(
     t.String({
-      description:
-        'Case-insensitive substring, matched against the title, description, issue number, and custom field text.',
+      description: 'Text to find in the title, description, issue number or custom field text.',
     }),
   ),
-  limit: t.Optional(t.Numeric({ description: 'Max results (1-500). Default 50.' })),
+  limit: t.Optional(t.Numeric({ description: '1-500. Default 50.' })),
+});
+
+export const searchAllIssuesQuery = t.Object({
+  q: t.String({
+    minLength: 1,
+    description:
+      'Text to find in the title, description, issue ' +
+      'number ("KEY-42" or a number) or custom field text.',
+  }),
+  limit: t.Optional(t.Numeric({ description: '1-50. Default 20.' })),
+  perProjectLimit: t.Optional(
+    t.Numeric({ description: 'Max results per project, 1-50. Default 5.' }),
+  ),
+  excludeProjectId: t.Optional(t.Numeric({ description: "Leave out this project's issues." })),
 });
 
 export const listIssuesQuery = t.Object({
-  columnId: t.Optional(t.Numeric({ description: 'Exact column (state) id.' })),
-  typeId: t.Optional(t.Numeric({ description: 'Exact issue type id.' })),
-  initiativeId: t.Optional(t.Numeric({ description: 'Exact initiative id.' })),
-  cycleId: t.Optional(t.Numeric({ description: 'Exact cycle id.' })),
-  parentId: t.Optional(
-    t.Numeric({ description: 'Parent issue id, to list that issue’s subtasks.' }),
+  columnId: t.Optional(t.Numeric()),
+  typeId: t.Optional(t.Numeric()),
+  initiativeId: t.Optional(t.Numeric()),
+  cycleId: t.Optional(t.Numeric()),
+  parentId: t.Optional(t.Numeric({ description: 'Lists the subtasks of this issue.' })),
+  assigneeUserId: t.Optional(t.String()),
+  delegateUserId: t.Optional(t.String()),
+  priority: t.Optional(t.String()),
+  labelIds: t.Optional(
+    t.String({ description: 'Comma-separated label ids. The issue must have all of them.' }),
   ),
-  assigneeUserId: t.Optional(t.String({ description: 'Exact assignee user id.' })),
-  delegateUserId: t.Optional(t.String({ description: 'Exact delegate agent id.' })),
-  priority: t.Optional(t.String({ description: 'Exact priority value.' })),
-  labelIds: t.Optional(t.String({ description: 'CSV of label ids; the issue must carry all.' })),
-  dueFrom: t.Optional(t.String({ description: "Inclusive earliest due date 'YYYY-MM-DD'." })),
-  dueTo: t.Optional(t.String({ description: "Inclusive latest due date 'YYYY-MM-DD'." })),
-  includeArchived: t.Optional(
-    t.String({ description: "'true' to include archived issues. Default false." }),
+  dueFrom: t.Optional(t.String({ description: "Due on or after 'YYYY-MM-DD'." })),
+  dueTo: t.Optional(t.String({ description: "Due on or before 'YYYY-MM-DD'." })),
+  createdFrom: instantQuery('Created at or after this'),
+  createdTo: instantQuery('Created before this'),
+  updatedFrom: instantQuery('Updated at or after this'),
+  updatedTo: instantQuery('Updated before this'),
+  blocked: t.Optional(
+    t.String({
+      description:
+        "'true' lists issues blocked by an open issue (not completed, canceled or archived).",
+    }),
   ),
-  limit: t.Optional(t.Numeric({ description: 'Max results (1-500). Default 50.' })),
+  includeArchived: t.Optional(t.String({ description: "'true' includes archived issues." })),
+  limit: t.Optional(t.Numeric({ description: '1-500. Default 50.' })),
 });
+
+export const listAllIssuesQuery = t.Composite([
+  t.Pick(listIssuesQuery, [
+    'assigneeUserId',
+    'delegateUserId',
+    'priority',
+    'dueFrom',
+    'dueTo',
+    'createdFrom',
+    'createdTo',
+    'updatedFrom',
+    'updatedTo',
+    'includeArchived',
+    'limit',
+  ]),
+  t.Object({
+    cycleIds: t.Optional(
+      t.String({ description: 'Comma-separated cycle ids. Matches issues in any of them.' }),
+    ),
+    parentIds: t.Optional(
+      t.String({ description: 'Comma-separated parent issue ids. Lists their subtasks.' }),
+    ),
+    stateTypes: t.Optional(
+      t.String({
+        description:
+          'Comma-separated state types: backlog, unstarted, started, completed, canceled. ' +
+          "'backlog,unstarted,started' lists open issues.",
+      }),
+    ),
+  }),
+]);
 
 export const issueSequenceParams = t.Object({
   projectKey: t.String(),
   sequenceNumber: t.Numeric(),
 });
 
+export const moveIssueBody = t.Object({
+  projectId: t.Integer({
+    description: 'Target project id from list_projects, in the same team.',
+  }),
+  columnId: t.Optional(
+    t.Integer({
+      description:
+        'Column id in the target project, from get_project. ' +
+        'Omit to use the column with the same name or state type.',
+    }),
+  ),
+});
+
 export const updateIssueBody = t.Object({
-  columnId: t.Optional(t.Integer({ description: 'Move the issue to this column (state) id.' })),
-  position: t.Optional(t.Number({ description: 'Ordering position within the column.' })),
-  typeId: t.Optional(t.Nullable(t.Integer({ description: 'New issue type id, or null.' }))),
+  columnId: t.Optional(t.Integer({ description: 'Column id to move the issue to.' })),
+  position: t.Optional(t.Number({ description: 'Position in the column.' })),
+  typeId: t.Optional(t.Nullable(t.Integer())),
   parentId: t.Optional(
     t.Nullable(
       t.Integer({
-        description:
-          'Make this issue a subtask of that issue id, or null to detach it. The parent must be in this project and must not be a subtask itself; an issue that has subtasks cannot become one.',
+        description: `Parent issue id, or null to detach. The parent must be in this project and must not be this issue or its subtask. The issue and its subtasks must stay within ${MAX_SUBTASK_DEPTH} levels.`,
       }),
     ),
   ),
   initiativeId: t.Optional(
     t.Nullable(
       t.Integer({
-        description:
-          'Link this issue to an initiative id, or null to unlink. From list_initiatives.',
+        description: 'Initiative id from list_initiatives, or null to unlink.',
       }),
     ),
   ),
   cycleId: t.Optional(
     t.Nullable(
       t.Integer({
-        description:
-          'Plan this issue into a cycle id, or null to unplan it. From list_cycles; a completed cycle is rejected.',
+        description: 'Cycle id from list_cycles, or null to remove. A completed cycle is refused.',
       }),
     ),
   ),
   assigneeUserId: t.Optional(
-    t.Nullable(t.String({ description: 'New assignee user id (a project member), or null.' })),
+    t.Nullable(t.String({ description: 'Project member user id, or null to unassign.' })),
   ),
   delegateUserId: t.Optional(
-    t.Nullable(t.String({ description: 'New delegate user id (an AI agent), or null.' })),
+    t.Nullable(t.String({ description: 'AI agent user id, or null to remove.' })),
   ),
-  title: t.Optional(t.String({ minLength: 1, description: 'New title.' })),
-  description: t.Optional(
-    t.String({ maxLength: ISSUE_TEXT_LIMIT, description: 'New description.' }),
-  ),
-  priority: t.Optional(
-    t.Nullable(t.String({ description: 'One of: urgent, high, medium, low. Or null.' })),
-  ),
+  title: t.Optional(t.String({ minLength: 1 })),
+  description: t.Optional(t.String({ maxLength: ISSUE_TEXT_LIMIT })),
+  priority: t.Optional(t.Nullable(t.String({ description: 'urgent, high, medium or low.' }))),
   estimatePoints: t.Optional(EstimatePointsSchema),
   estimateMinutes: t.Optional(EstimateMinutesSchema),
-  startDate: t.Optional(t.Nullable(isoDate("Start date 'YYYY-MM-DD', or null."))),
-  dueDate: t.Optional(t.Nullable(isoDate("Due date 'YYYY-MM-DD', or null."))),
-  labelIds: t.Optional(
-    t.Array(t.Integer(), { description: "Replace the issue's labels with these ids." }),
-  ),
+  startDate: t.Optional(t.Nullable(isoDate())),
+  dueDate: t.Optional(t.Nullable(isoDate())),
+  labelIds: t.Optional(t.Array(t.Integer(), { description: 'Replaces all labels.' })),
 });
 
 export const subtaskDispositionQuery = t.Object({
@@ -599,9 +710,9 @@ export const issueFieldParams = t.Object({ issueId: t.Numeric(), fieldId: t.Nume
 
 export const addIssueLinkBody = t.Object({
   targetIssueId: t.Integer({
-    description: 'Numeric id of the issue on the other end of the relation.',
+    description: 'Id of the other issue.',
   }),
-  kind: IssueLinkKindSchema,
+  kind: issueLinkKind('Relation from issueId to targetIssueId.'),
 });
 
 export const issueLinkParams = t.Object({ issueId: t.Numeric(), linkId: t.Numeric() });
@@ -610,9 +721,13 @@ export const checklistTitleBody = t.Object({ title: ChecklistTitleSchema });
 
 export const createChecklistItemBody = t.Object({ content: ChecklistItemContentSchema });
 
+export const createChecklistItemsBody = t.Object({
+  items: t.Array(createChecklistItemBody, { minItems: 1, maxItems: 100 }),
+});
+
 export const updateChecklistItemBody = t.Object({
   content: t.Optional(ChecklistItemContentSchema),
-  done: t.Optional(t.Boolean({ description: 'Whether the item is checked off.' })),
+  done: t.Optional(t.Boolean()),
 });
 
 export const feedRangeQuery = t.Object({
@@ -625,7 +740,6 @@ export const feedRangeQuery = t.Object({
 const commentText = t.String({
   minLength: 1,
   maxLength: ISSUE_TEXT_LIMIT,
-  description: 'Comment text.',
 });
 
 export const createCommentBody = t.Object({
@@ -638,7 +752,21 @@ export const updateCommentBody = t.Object({
 });
 
 export const commentParams = t.Object({
-  commentId: t.Numeric({ description: 'The comment id.' }),
+  commentId: t.Numeric(),
+});
+
+// The service checks that the text is one emoji; the length bounds it before that.
+const reactionEmoji = t.String({
+  minLength: 1,
+  maxLength: 64,
+  description: 'One emoji, such as 👍 or ✅.',
+});
+
+export const addReactionBody = t.Object({ emoji: reactionEmoji });
+
+export const reactionParams = t.Object({
+  commentId: t.Numeric(),
+  emoji: reactionEmoji,
 });
 
 export const archiveIssueBody = t.Optional(
@@ -657,3 +785,52 @@ export const BulkDeletedResponse = t.Object({ deleted: t.Number() });
 export const BoardResponse = t.Object({ issues: t.Array(BoardIssueResponse) });
 
 export const WatchStateResponse = t.Object({ ok: t.Boolean() });
+
+export const issueAgentRunsQuery = t.Object({
+  before: t.Optional(t.Numeric({ minimum: 1, multipleOf: 1 })),
+  limit: t.Optional(t.Numeric({ minimum: 1, maximum: 50, multipleOf: 1, default: 25 })),
+});
+
+export const issueAgentRunParams = t.Object({
+  issueId: t.Numeric(),
+  runId: t.Numeric(),
+});
+
+export const IssueAgentRunPageResponse = t.Object({
+  items: t.Array(
+    t.Object({
+      id: t.Number(),
+      agentId: t.Number(),
+      username: t.String(),
+      kind: t.String(),
+      status: t.String(),
+      executionState: agentExecutionState,
+      trigger: t.String(),
+      prompt: t.String(),
+      output: t.Nullable(t.String()),
+      attempts: t.Number(),
+      lastError: t.Nullable(t.String()),
+      contextTokens: t.Optional(t.Number()),
+      createdAt: t.String(),
+      startedAt: t.Nullable(t.String()),
+      finishedAt: t.Nullable(t.String()),
+      nextAttemptAt: t.String(),
+    }),
+  ),
+  nextCursor: t.Nullable(t.Number()),
+});
+
+export const issueAgentTraceQuery = t.Object({
+  traceId: t.Optional(t.String({ minLength: 1, maxLength: 128 })),
+});
+
+export const IssueAgentRunTraceResponse = t.Nullable(
+  t.Object({
+    ...AgentTraceDetailResponse.properties,
+    previousTraceId: t.Nullable(t.String()),
+    attempt: t.Number({
+      description: 'The place of this attempt among the recorded ones, oldest 1.',
+    }),
+    attempts: t.Number({ description: 'How many attempts of the run recorded a trace.' }),
+  }),
+);

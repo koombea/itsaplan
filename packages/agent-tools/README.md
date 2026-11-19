@@ -63,6 +63,21 @@ resolves it.
      };
      ```
 
+   Optional fields of the `Integration`:
+   - `icon`: the brand mark in `icon.ts`, one SVG path in a 24×24 box and its fill
+     color. Leave the color out for a black mark, so it follows the text color.
+     Without an icon the interface shows the label's first letters.
+   - `website`: the service's homepage, linked from the interface.
+   - `verify`: asks the service whether it accepts a credential before it is saved, in
+     `verify.ts`. Use one request that spends nothing. Answer `rejected` only for a
+     refusal the API itself sends (a bot wall answers 403 with a page). Answer
+     `unavailable` for anything else that is not a success. Call an address that comes
+     from the credential through `pinnedFetch` from `@repo/net`. Without `verify` the
+     credential is saved unchecked.
+   - `credentialOptional`: its tools also run with no credential, on the service's
+     keyless tier.
+   - `help` on a credential field: markdown shown behind a "?" by the field's label.
+
 2. Register it in `src/registry.ts`. This is the one manual step: import the
    integration and add it to the `INTEGRATIONS` array.
 
@@ -70,10 +85,25 @@ Everything downstream reads from that array: the tool index, the
 `integrationDescriptors()` catalog for the UI, and `coerceConfig`/`redactConfig`. No
 other file needs editing.
 
+## Integrations from outside this package
+
+A build that extends the api adds integrations of its own at startup with
+`setExtraIntegrations([...])`. They join the core's in the tool index and the catalog.
+Each call replaces the previous ones, and a call without an argument removes them. A
+key that is already taken throws. A configured tool whose integration is removed stays
+stored, and the runtime skips it.
+
+## An integration without a credential
+
+An integration whose tools need no account with an external service (PDF downloads
+the file and parses it in the api process) declares `credentialSchema: []`. Its tools are configured without a
+credential, its `execute` receives `{}`, and the API refuses to store a credential for
+it.
+
 ## Rules
 
 - **A tool `key` is unique across all integrations.** The tool index is a flat map by
-  key; a duplicate throws when `registry.ts` loads.
+  key; a duplicate throws when `registry.ts` loads or when `setExtraIntegrations` adds it.
 - **Mark secrets `type: "secret"`** in `credentialSchema`. Non-secret fields are
   stored in plaintext and shown unredacted in the list UI.
 - **Throw a clear `Error` on failure.** The runtime catches it and returns

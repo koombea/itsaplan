@@ -1,95 +1,104 @@
 import { useState, type Ref } from 'react';
-import { useLocale, useTranslations } from 'next-intl';
-import type { Project } from '@/lib/api/endpoints/projects';
+import { useTranslations } from 'next-intl';
+import type { ProjectSort } from '@/lib/api/endpoints/projects';
 import type { Team } from '@/lib/api/endpoints/teams';
+import type { WorkspaceSummary } from '@/lib/api/endpoints/workspaces';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { Command, CommandInput, CommandList } from '@/components/ui/command';
-import ProjectSwitcherTeamGroup from './ProjectSwitcherTeamGroup';
-import ProjectSwitcherHiddenProjects from './ProjectSwitcherHiddenProjects';
-import { projectSwitcherSections, type ProjectSort } from './utils/projectSwitcher';
+import type { ProjectSwitcherScope } from './ProjectSwitcher';
+import ProjectSwitcherRecent from './ProjectSwitcherRecent';
+import ProjectSwitcherResults from './ProjectSwitcherResults';
+import ProjectSwitcherSort from './ProjectSwitcherSort';
 
 export default function ProjectSwitcherList({
-  projects,
+  workspace,
   teams,
-  current,
+  scope,
+  currentProjectKey,
+  recentIds,
   sort,
-  showHidden,
-  onShowHiddenChange,
-  openTeams,
-  onOpenTeam,
+  onSortChange,
   onSelectProject,
   inputRef,
 }: {
-  projects: Project[];
+  workspace?: WorkspaceSummary;
   teams: Team[];
-  current?: Project;
+  scope: ProjectSwitcherScope;
+  currentProjectKey: string | null;
+  recentIds: number[];
   sort: ProjectSort;
-  showHidden: boolean;
-  onShowHiddenChange: (show: boolean) => void;
-  openTeams: Record<number, boolean>;
-  onOpenTeam: (teamId: number, open: boolean) => void;
+  onSortChange: (sort: ProjectSort) => void;
   onSelectProject: (key: string) => void;
   inputRef: Ref<HTMLInputElement>;
 }) {
   const t = useTranslations('nav');
-  const locale = useLocale();
   const [query, setQuery] = useState('');
-  const { visibleGroups: groups, hiddenProjects } = projectSwitcherSections(
-    projects,
-    teams,
-    query,
-    sort,
-    locale,
-  );
-  const searching = query.trim().length > 0;
-  const hiddenCount = projects.filter((project) => project.isHidden).length;
+  const q = useDebouncedValue(query.trim(), 250);
+  const workspaceId = workspace?.id;
+  const rowProps = {
+    currentProjectKey,
+    workspaceRole: workspace?.role ?? null,
+    onSelectProject,
+  };
+
+  let content;
+  if (q) {
+    content = (
+      <ProjectSwitcherResults
+        filters={{ workspaceId, q, sort }}
+        empty={t('projectPicker.noResults')}
+        showTeam
+        {...rowProps}
+      />
+    );
+  } else if (scope === 'recent') {
+    content = (
+      <ProjectSwitcherRecent
+        workspaceId={workspaceId}
+        sort={sort}
+        recentIds={recentIds}
+        {...rowProps}
+      />
+    );
+  } else if (scope === 'hidden') {
+    content = (
+      <ProjectSwitcherResults
+        filters={{ workspaceId, hidden: true, sort }}
+        empty={t('projectPicker.noHiddenProjects')}
+        showTeam
+        {...rowProps}
+      />
+    );
+  } else {
+    content = (
+      <ProjectSwitcherResults
+        filters={{ teamId: scope, hidden: false, sort }}
+        heading={teams.find((team) => team.id === scope)?.name}
+        empty={t('noProjects')}
+        {...rowProps}
+      />
+    );
+  }
 
   return (
     <Command
       shouldFilter={false}
       loop
-      className="min-h-0 flex-1 rounded-none"
+      className="min-h-0 min-w-0 flex-1 rounded-none"
       label={t('projects')}
     >
-      <CommandInput
-        ref={inputRef}
-        value={query}
-        onValueChange={setQuery}
-        placeholder={t('projectPicker.search')}
-        aria-label={t('projectPicker.search')}
-      />
-      <CommandList className="max-h-none min-h-0 flex-1 p-1">
-        {groups.every((group) => group.projects.length === 0) && (
-          <p role="status" className="px-3 py-6 text-center text-sm text-muted-foreground">
-            {searching ? t('projectPicker.noResults') : t('projectPicker.noVisibleProjects')}
-          </p>
-        )}
-        {groups.map((group) => (
-          <ProjectSwitcherTeamGroup
-            key={group.teamId}
-            group={group}
-            currentProjectKey={current?.key ?? null}
-            open={
-              searching ||
-              (openTeams[group.teamId] ??
-                (group.teamId === current?.teamId ||
-                  group.projects.some((project) => project.isFavorite)))
-            }
-            searching={searching}
-            onOpenChange={(open) => onOpenTeam(group.teamId, open)}
-            onSelectProject={onSelectProject}
-          />
-        ))}
-        {(hiddenCount > 0 || showHidden) && (
-          <ProjectSwitcherHiddenProjects
-            projects={hiddenProjects}
-            hiddenCount={hiddenCount}
-            expanded={showHidden}
-            onExpandedChange={onShowHiddenChange}
-            currentProjectKey={current?.key ?? null}
-            onSelectProject={onSelectProject}
-          />
-        )}
-      </CommandList>
+      <div className="flex shrink-0 items-center gap-1 border-b pe-2 [&>[data-slot=command-input-wrapper]]:h-12 [&>[data-slot=command-input-wrapper]]:min-w-0 [&>[data-slot=command-input-wrapper]]:flex-1 [&>[data-slot=command-input-wrapper]]:border-0">
+        <CommandInput
+          ref={inputRef}
+          value={query}
+          onValueChange={setQuery}
+          className="text-sm"
+          placeholder={t('projectPicker.search')}
+          aria-label={t('projectPicker.search')}
+        />
+        <ProjectSwitcherSort sort={sort} onSortChange={onSortChange} />
+      </div>
+      <CommandList className="max-h-none min-h-0 flex-1 p-1.5">{content}</CommandList>
     </Command>
   );
 }

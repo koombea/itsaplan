@@ -4,6 +4,8 @@ import { act } from 'react';
 import type { Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { JSDOM } from 'jsdom';
+import { NextIntlClientProvider } from 'next-intl';
+import onboarding from '../../../messages/en/onboarding.json';
 import { BrandingProvider } from '@/context/brandingContext';
 import { DEFAULT_BRANDING } from '@/utils/branding';
 import { qk } from '@/services/queryKeys';
@@ -31,6 +33,14 @@ const status: UpdateStatus = {
   releases: [],
 };
 
+// The mark is always a button, the one that opens the product tour; the setting only
+// decides whether the name and the version are one too.
+function versionButton() {
+  return [...document.querySelectorAll('button')].find((button) =>
+    /v1\.2\.3/.test(button.textContent ?? ''),
+  );
+}
+
 function render(releaseHistoryEnabled: boolean) {
   // A disabled query still reads what is already in the cache, so seeding it gives
   // the component the owner's release data without a session behind it.
@@ -38,9 +48,11 @@ function render(releaseHistoryEnabled: boolean) {
   act(() =>
     root.render(
       <QueryClientProvider client={client}>
-        <BrandingProvider branding={{ ...DEFAULT_BRANDING, releaseHistoryEnabled }}>
-          <SidebarBrandFooter />
-        </BrandingProvider>
+        <NextIntlClientProvider locale="en" messages={{ onboarding }} timeZone="UTC">
+          <BrandingProvider branding={{ ...DEFAULT_BRANDING, releaseHistoryEnabled }}>
+            <SidebarBrandFooter />
+          </BrandingProvider>
+        </NextIntlClientProvider>
       </QueryClientProvider>,
     ),
   );
@@ -79,7 +91,7 @@ afterEach(() => {
 describe('SidebarBrandFooter', () => {
   it('opens the release history from the footer while the instance allows it', () => {
     render(true);
-    assert.ok(document.querySelector('button'));
+    assert.ok(versionButton());
   });
 
   // An operator who turns the panel off wants the footer inert, and the release data
@@ -87,7 +99,8 @@ describe('SidebarBrandFooter', () => {
   // owner keeps the click everyone else never had.
   it('is not a button once the instance turns the release history off', () => {
     render(false);
-    assert.equal(document.querySelector('button'), null);
+    assert.equal(versionButton(), undefined);
+    assert.ok(document.querySelector('button[data-product-mark]'));
   });
 
   it('keeps the identity and the running version with the release history off', () => {

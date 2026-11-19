@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
 import type { MastraMessagePart } from '@mastra/core/agent/message-list';
-import { authedApi, type Api } from '#tests/helpers/app';
+import { authedApi, type Api, createProject } from '#tests/helpers/app';
 import { signUpTestUser } from '#tests/helpers/auth';
 import { resetDb } from '#tests/helpers/db';
 import { ensureThread, buildMemory } from '../../runtime/memory';
@@ -25,7 +25,7 @@ import { createAgent } from '#tests/helpers/agents';
 async function setup() {
   const owner = await signUpTestUser({ name: 'Owner' });
   const asOwner = authedApi(owner.cookie);
-  await asOwner.projects.post({ key: 'MKT', name: 'Marketing' });
+  await createProject(asOwner, { key: 'MKT', name: 'Marketing' });
   return { owner, asOwner };
 }
 
@@ -541,18 +541,6 @@ describe('agent chat history', () => {
     expect(all.data!.items.map((t) => [t.id, t.favorite])).toEqual([['kept', false]]);
   });
 
-  it("404s a run continuing another user's chat thread", async () => {
-    const { asOwner } = await setup();
-    const agent = await createInternalAgent(asOwner, 'Design Bot', 'design');
-    await seedThread(`chat:${agent.id}:another-user-id:t1`, 'another-user-id', agent, 'theirs');
-
-    const res = await agents(asOwner)({ agentId: agent.id }).run.post({
-      prompt: 'what did they ask?',
-      threadId: `chat:${agent.id}:another-user-id:t1`,
-    });
-    expect(res.status).toBe(404);
-  });
-
   it("404s a streamed run continuing another user's chat thread", async () => {
     const { asOwner } = await setup();
     const agent = await createInternalAgent(asOwner, 'Design Bot', 'design');
@@ -565,25 +553,25 @@ describe('agent chat history', () => {
     expect(res.status).toBe(404);
   });
 
-  it("404s a run continuing another agent's chat thread of the same user", async () => {
+  it("404s a streamed run continuing another agent's chat thread of the same user", async () => {
     const { owner, asOwner } = await setup();
     const a = await createInternalAgent(asOwner, 'Bot A', 'bota');
     const b = await createInternalAgent(asOwner, 'Bot B', 'botb');
     await seedThread(`chat:${a.id}:${owner.userId}:t1`, owner.userId, a, 'with a');
 
-    const res = await agents(asOwner)({ agentId: b.id }).run.post({
+    const res = await agents(asOwner)({ agentId: b.id }).run.stream.post({
       prompt: 'what did I ask A?',
       threadId: `chat:${a.id}:${owner.userId}:t1`,
     });
     expect(res.status).toBe(404);
   });
 
-  it('404s a run handed the thread of an autonomous run', async () => {
+  it('404s a streamed run handed the thread of an autonomous run', async () => {
     const { asOwner } = await setup();
     const agent = await createInternalAgent(asOwner, 'Design Bot', 'design');
 
     for (const threadId of [`issue:1:${agent.id}`, 'schedule:1', 'run:1']) {
-      const res = await agents(asOwner)({ agentId: agent.id }).run.post({
+      const res = await agents(asOwner)({ agentId: agent.id }).run.stream.post({
         prompt: 'what did you do?',
         threadId,
       });
@@ -591,16 +579,16 @@ describe('agent chat history', () => {
     }
   });
 
-  it("accepts the caller's own chat thread id and fails later on the model config", async () => {
+  it("accepts the caller's own chat thread id", async () => {
     const { owner, asOwner } = await setup();
     const agent = await createInternalAgent(asOwner, 'Design Bot', 'design');
 
-    // The agent has no model credential, so the run stops at 400 — past the thread
-    // check, which is what this asserts.
-    const res = await agents(asOwner)({ agentId: agent.id }).run.post({
+    // The agent has no model credential, so the stream reports that as an error event,
+    // past the thread check, which is what this asserts.
+    const res = await agents(asOwner)({ agentId: agent.id }).run.stream.post({
       prompt: 'hello',
       threadId: `chat:${agent.id}:${owner.userId}:t1`,
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
   });
 });

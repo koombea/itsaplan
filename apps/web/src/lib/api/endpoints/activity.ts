@@ -1,10 +1,24 @@
 import { request } from '@/lib/api/core/client';
 
-// The query string both feed reads take, empty for the first page.
-function feedPageQuery(params: { cursor?: FeedCursor | null; limit?: number }): string {
+// Which entries a feed page holds: only comments, only the change log without time
+// entries, or only time entries. Absent serves every entry.
+export type FeedFilter = 'comments' | 'history' | 'worklog';
+export type FeedOrder = 'desc' | 'asc';
+
+export interface FeedPageParams {
+  cursor?: FeedCursor | null;
+  limit?: number;
+  filter?: FeedFilter;
+  order?: FeedOrder;
+}
+
+// The query string both feed reads take, empty for the first page of every entry.
+function feedPageQuery(params: FeedPageParams): string {
   const q = new URLSearchParams();
   if (params.limit) q.set('limit', String(params.limit));
   if (params.cursor) q.set('cursor', JSON.stringify(params.cursor));
+  if (params.filter) q.set('filter', params.filter);
+  if (params.order) q.set('order', params.order);
   const qs = q.toString();
   return qs ? `?${qs}` : '';
 }
@@ -50,6 +64,7 @@ export type ActivityAction =
   | 'parent'
   | 'subtask_add'
   | 'subtask_remove'
+  | 'moved'
   | 'checklist_add'
   | 'checklist_rename'
   | 'checklist_remove'
@@ -91,6 +106,12 @@ export interface ActivityPayload {
   to?: ActivitySide;
 }
 
+// One emoji on a comment and the members who reacted with it, the first first.
+export interface CommentReaction {
+  emoji: string;
+  users: { id: string; name: string }[];
+}
+
 // One entry in an issue's timeline. kind selects which fields are set: a 'comment'
 // carries body; an 'activity' carries action and payload.
 // actorName is the author/actor snapshot (null when it was never set).
@@ -108,6 +129,8 @@ export interface FeedItem {
   createdAt: string;
   // Set once a comment is edited; null while it is in its author's original words.
   editedAt: string | null;
+  // The emoji reactions of a comment; empty on a change-log entry.
+  reactions: CommentReaction[];
 }
 
 // Opaque keyset cursor returned by the feed endpoint; pass it back to load the
@@ -154,16 +177,23 @@ export interface TimelineSegment {
   durationMs: number;
 }
 
-export const listFeed = (
-  issueId: number,
-  params: { cursor?: FeedCursor | null; limit?: number } = {},
-) => request<FeedPage>(`/issues/${issueId}/feed${feedPageQuery(params)}`);
+export const listFeed = (issueId: number, params: FeedPageParams = {}) =>
+  request<FeedPage>(`/issues/${issueId}/feed${feedPageQuery(params)}`);
 
 // The same page, split into the stretches the issue spent in one status.
-export const listGroupedFeed = (
-  issueId: number,
-  params: { cursor?: FeedCursor | null; limit?: number } = {},
-) => request<GroupedFeedPage>(`/issues/${issueId}/feed/grouped${feedPageQuery(params)}`);
+export const listGroupedFeed = (issueId: number, params: FeedPageParams = {}) =>
+  request<GroupedFeedPage>(`/issues/${issueId}/feed/grouped${feedPageQuery(params)}`);
+
+// How many entries each filter keeps; `all` is every entry. A reply counts as a comment.
+export interface FeedCounts {
+  all: number;
+  comments: number;
+  history: number;
+  worklog: number;
+}
+
+export const getFeedCounts = (issueId: number) =>
+  request<FeedCounts>(`/issues/${issueId}/feed/counts`);
 
 export const listTimeline = (issueId: number) =>
   request<TimelineSegment[]>(`/issues/${issueId}/timeline`);
@@ -189,3 +219,14 @@ export const updateComment = (commentId: number, input: { body: string }) =>
 
 export const deleteComment = (commentId: number) =>
   request<void>(`/comments/${commentId}`, { method: 'DELETE' });
+
+export const addCommentReaction = (commentId: number, emoji: string) =>
+  request<CommentReaction[]>(`/comments/${commentId}/reactions`, {
+    method: 'POST',
+    body: JSON.stringify({ emoji }),
+  });
+
+export const removeCommentReaction = (commentId: number, emoji: string) =>
+  request<void>(`/comments/${commentId}/reactions/${encodeURIComponent(emoji)}`, {
+    method: 'DELETE',
+  });

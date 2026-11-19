@@ -23,6 +23,9 @@ export const agentRunTrigger = t.Union([
   t.Literal('field'),
   t.Literal('schedule'),
   t.Literal('manual'),
+  t.Literal('status'),
+  t.Literal('event'),
+  t.Literal('api'),
 ]);
 
 export type AgentRunTrigger = typeof agentRunTrigger.static;
@@ -107,3 +110,119 @@ export type ChatThreadPage = {
   items: ChatThreadSummary[];
   nextPage: number | null;
 };
+
+export const agentExecutionState = t.Union([
+  t.Literal('queued'),
+  t.Literal('running'),
+  t.Literal('success'),
+  t.Literal('failed'),
+  t.Literal('canceled'),
+]);
+
+// External agent runs and chats are carried by AG-UI events (https://docs.ag-ui.com):
+// the runner reports what its coding agent produces as this event stream, and the
+// browser is served the same events. The schemas below are the subset the UI needs,
+// with the field names the protocol defines, so a runner that already speaks AG-UI
+// needs no translation. Lifecycle ids are optional here because the server knows the
+// thread and the answer they belong to; everything else is required as specified.
+
+// A positive integer from the environment, or the fallback when it is unset or not one,
+// so a typo cannot shrink a limit to zero.
+function intEnv(name: string, fallback: number): number {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+// The longest text delta accepted in one event. A runner buffers its output rather
+// than sending a request per token, and this bounds how much one event may carry.
+//
+// 🔴 A runner truncates to the same two numbers before it posts, so raising one here
+// without raising it in the runner only wastes headroom, and raising it in the runner
+// alone puts every oversized event past this maxLength — the whole batch then fails
+// the union with a 400 that names no field, and the answer is lost. Set both.
+// The runner reads ITSAPLAN_DELTA_LIMIT and ITSAPLAN_TOOL_TEXT_LIMIT.
+//
+// Read once at module load: the schemas below are built from them, and the process
+// does not outlive its environment.
+const DELTA_LIMIT = intEnv('AGENT_CHAT_DELTA_LIMIT', 12_000);
+
+// The longest arguments or result accepted for one tool call. A runner reports each of
+// them whole, and cutting one breaks the JSON the chat indents and highlights, so this
+// is the larger of the two.
+const TOOL_TEXT_LIMIT = intEnv('AGENT_CHAT_TOOL_TEXT_LIMIT', 32_000);
+
+const RunStartedEvent = t.Object({
+  type: t.Literal('RUN_STARTED'),
+  threadId: t.Optional(t.String()),
+  runId: t.Optional(t.String()),
+});
+
+const RunFinishedEvent = t.Object({
+  type: t.Literal('RUN_FINISHED'),
+  threadId: t.Optional(t.String()),
+  runId: t.Optional(t.String()),
+});
+
+const RunErrorEvent = t.Object({
+  type: t.Literal('RUN_ERROR'),
+  message: t.String({ maxLength: 2000 }),
+  code: t.Optional(t.String({ maxLength: 200 })),
+});
+
+const TextMessageStartEvent = t.Object({
+  type: t.Literal('TEXT_MESSAGE_START'),
+  messageId: t.String({ maxLength: 200 }),
+  role: t.Literal('assistant'),
+});
+
+const TextMessageContentEvent = t.Object({
+  type: t.Literal('TEXT_MESSAGE_CONTENT'),
+  messageId: t.String({ maxLength: 200 }),
+  delta: t.String({ maxLength: DELTA_LIMIT }),
+});
+
+const TextMessageEndEvent = t.Object({
+  type: t.Literal('TEXT_MESSAGE_END'),
+  messageId: t.String({ maxLength: 200 }),
+});
+
+const ToolCallStartEvent = t.Object({
+  type: t.Literal('TOOL_CALL_START'),
+  toolCallId: t.String({ maxLength: 200 }),
+  toolCallName: t.String({ maxLength: 200 }),
+  parentMessageId: t.Optional(t.String({ maxLength: 200 })),
+});
+
+const ToolCallArgsEvent = t.Object({
+  type: t.Literal('TOOL_CALL_ARGS'),
+  toolCallId: t.String({ maxLength: 200 }),
+  delta: t.String({ maxLength: TOOL_TEXT_LIMIT }),
+});
+
+const ToolCallEndEvent = t.Object({
+  type: t.Literal('TOOL_CALL_END'),
+  toolCallId: t.String({ maxLength: 200 }),
+});
+
+const ToolCallResultEvent = t.Object({
+  type: t.Literal('TOOL_CALL_RESULT'),
+  messageId: t.String({ maxLength: 200 }),
+  toolCallId: t.String({ maxLength: 200 }),
+  content: t.String({ maxLength: TOOL_TEXT_LIMIT }),
+  role: t.Optional(t.Literal('tool')),
+});
+
+export const AgUiEvent = t.Union([
+  RunStartedEvent,
+  RunFinishedEvent,
+  RunErrorEvent,
+  TextMessageStartEvent,
+  TextMessageContentEvent,
+  TextMessageEndEvent,
+  ToolCallStartEvent,
+  ToolCallArgsEvent,
+  ToolCallEndEvent,
+  ToolCallResultEvent,
+]);
+
+export type AgUiEventBody = typeof AgUiEvent.static;

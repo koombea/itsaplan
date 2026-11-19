@@ -31,9 +31,20 @@ export const AgentToolResponse = t.Object({
   id: t.Number(),
   teamId: t.Number(),
   toolKey: t.String(),
-  credentialId: t.Number(),
+  // Null for a tool added with no credential: its integration needs none, or runs
+  // without one on a keyless tier.
+  credentialId: t.Nullable(t.Number()),
   integrationKey: t.String(),
   credentialLabel: t.Nullable(t.String()),
+  label: t.String(),
+  description: t.Nullable(t.String()),
+  source: t.Nullable(
+    t.String({ description: 'The extension that defines the tool; null for a catalog tool.' }),
+  ),
+  supported: t.Boolean({
+    description:
+      'False for a tool this instance does not have: no agent gets it until it does again.',
+  }),
   createdAt: t.String(),
 });
 
@@ -41,11 +52,32 @@ export const AgentToolListResponse = t.Array(AgentToolResponse);
 
 export const AgentToolPageResponse = pageResponse(AgentToolResponse);
 
-export const agentToolListQuery = t.Object(pageQueryFields);
+export const agentToolListQuery = t.Object({
+  search: t.Optional(
+    t.String({
+      maxLength: 200,
+      description: 'Matches tool name, group or integration.',
+    }),
+  ),
+  group: t.Optional(
+    t.String({
+      maxLength: 1000,
+      description:
+        'Comma-separated groups: an integration key, or ' +
+        "the `source` of the team's own tools. Omit for all.",
+    }),
+  ),
+  ...pageQueryFields,
+});
 
 export const createAgentToolBody = t.Object({
   toolKey: t.String({ minLength: 1 }),
-  credentialId: t.Number(),
+  credentialId: t.Optional(
+    t.Number({
+      description:
+        "Required unless the tool's integration needs no credential or can run without one (credentialOptional).",
+    }),
+  ),
 });
 
 export const setAgentToolsBody = t.Object({

@@ -1,6 +1,7 @@
 import { db, userPreference } from '@repo/db';
+import { DEFAULT_LOCALE, type Locale } from '@repo/mailer';
 import { eq, sql } from 'drizzle-orm';
-import { DEFAULT_LOCALE, type Locale } from './locale';
+import { HttpError } from '#shared/lib';
 
 // A user's own interface preferences, held per account so the same choices apply on
 // every device. One row per user; absent means nothing was changed yet and the
@@ -11,12 +12,29 @@ import { DEFAULT_LOCALE, type Locale } from './locale';
 export const DEFAULT_TIMEZONE = 'UTC';
 
 export const THEMES = ['light', 'dark', 'system'] as const;
+export const PALETTES = [
+  'default',
+  'github',
+  'nord',
+  'catppuccin',
+  'one',
+  'tomorrow',
+  'nightfox',
+  'custom',
+] as const;
 export const ISSUE_OPEN_MODES = ['panel', 'page'] as const;
 export const START_PAGES = ['inbox', 'dashboard', 'work-items', 'initiatives'] as const;
 export const ISSUE_STATS_VIEWS = ['compact', 'timeline'] as const;
 export const ISSUE_ACTIVITY_VIEWS = ['flat', 'grouped'] as const;
 
 export type Theme = (typeof THEMES)[number];
+export type Palette = (typeof PALETTES)[number];
+export interface CustomTheme {
+  accent: string;
+  background: string;
+  // 0–100: how far text and borders stand out from the background.
+  contrast: number;
+}
 export type IssueOpenMode = (typeof ISSUE_OPEN_MODES)[number];
 export type StartPage = (typeof START_PAGES)[number];
 export type IssueStatsView = (typeof ISSUE_STATS_VIEWS)[number];
@@ -27,6 +45,11 @@ export interface UserPreferenceDto {
   // The interface language, also used for this user's emails and bot messages.
   locale: Locale;
   theme: Theme;
+  // The color theme drawn in the light or dark mode `theme` picks. 'custom' draws
+  // customTheme instead, and its background decides light or dark.
+  palette: Palette;
+  // Kept when the user switches to another palette, so switching back restores it.
+  customTheme: CustomTheme | null;
   issueOpenMode: IssueOpenMode;
   startPage: StartPage;
   // Keeps the floating AI chat button on screen from the start, with the chat
@@ -40,6 +63,8 @@ export interface UserPreferenceDto {
   // Whether the user is subscribed to the issues they create, are assigned, comment
   // on or are mentioned in. Off means they only ever subscribe by hand.
   autoWatch: boolean;
+  // Whether the user closed the tour of the product the web app shows once.
+  onboardingSeen: boolean;
   // The project the user was in last, or null before they opened one. The app root
   // reopens it; a deleted project clears it through the FK.
   lastProjectId: number | null;
@@ -56,6 +81,8 @@ export function defaults(locale: Locale = DEFAULT_LOCALE): UserPreferenceDto {
     timezone: DEFAULT_TIMEZONE,
     locale,
     theme: 'system',
+    palette: 'default',
+    customTheme: null,
     issueOpenMode: 'panel',
     startPage: 'work-items',
     showChatByDefault: false,
@@ -63,6 +90,7 @@ export function defaults(locale: Locale = DEFAULT_LOCALE): UserPreferenceDto {
     issueStatsView: 'compact',
     issueActivityView: 'flat',
     autoWatch: true,
+    onboardingSeen: false,
     lastProjectId: null,
     hotkeys: {},
   };
@@ -83,6 +111,8 @@ function toDto(row: {
   timezone: string;
   locale: string;
   theme: string;
+  palette: string;
+  customTheme: CustomTheme | null;
   issueOpenMode: string;
   startPage: string;
   showChatByDefault: boolean;
@@ -90,6 +120,7 @@ function toDto(row: {
   issueStatsView: string;
   issueActivityView: string;
   autoWatch: boolean;
+  onboardingSeen: boolean;
   lastProjectId: number | null;
   hotkeys: Record<string, string> | null;
 }): UserPreferenceDto {
@@ -97,6 +128,8 @@ function toDto(row: {
     timezone: row.timezone,
     locale: row.locale as Locale,
     theme: row.theme as Theme,
+    palette: row.palette as Palette,
+    customTheme: row.customTheme,
     issueOpenMode: row.issueOpenMode as IssueOpenMode,
     startPage: row.startPage as StartPage,
     showChatByDefault: row.showChatByDefault,
@@ -104,6 +137,7 @@ function toDto(row: {
     issueStatsView: row.issueStatsView as IssueStatsView,
     issueActivityView: row.issueActivityView as IssueActivityView,
     autoWatch: row.autoWatch,
+    onboardingSeen: row.onboardingSeen,
     lastProjectId: row.lastProjectId,
     hotkeys: row.hotkeys ?? {},
   };
@@ -119,6 +153,8 @@ export async function getPreferences(
       timezone: userPreference.timezone,
       locale: userPreference.locale,
       theme: userPreference.theme,
+      palette: userPreference.palette,
+      customTheme: userPreference.customTheme,
       issueOpenMode: userPreference.issueOpenMode,
       startPage: userPreference.startPage,
       showChatByDefault: userPreference.showChatByDefault,
@@ -126,6 +162,7 @@ export async function getPreferences(
       issueStatsView: userPreference.issueStatsView,
       issueActivityView: userPreference.issueActivityView,
       autoWatch: userPreference.autoWatch,
+      onboardingSeen: userPreference.onboardingSeen,
       lastProjectId: userPreference.lastProjectId,
       hotkeys: userPreference.hotkeys,
     })
@@ -142,6 +179,9 @@ export async function updatePreferences(
   defaultLocale: Locale = DEFAULT_LOCALE,
 ): Promise<UserPreferenceDto> {
   const next = { ...(await getPreferences(userId, defaultLocale)), ...patch };
+  if (next.palette === 'custom' && !next.customTheme) {
+    throw new HttpError(400, 'A custom palette needs its colors');
+  }
   await db
     .insert(userPreference)
     .values({ userId, ...next })

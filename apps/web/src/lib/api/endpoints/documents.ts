@@ -36,6 +36,10 @@ export interface ProjectDocumentSummary {
 export interface ProjectDocument extends ProjectDocumentSummary {
   content: string;
   contentJson: Record<string, unknown> | null;
+  shareToken: string | null;
+  shareExpiresAt: string | null;
+  shareIncludeChildren: boolean;
+  shareIncludeIssues: boolean;
 }
 
 export interface DocumentIssueLink {
@@ -304,15 +308,9 @@ export interface DocumentComment {
   updatedAt: string;
 }
 
-export const openDocumentSession = (
-  projectKey: string,
-  documentId: number,
-  version: number,
-  contentJson: Record<string, unknown>,
-) =>
+export const openDocumentSession = (projectKey: string, documentId: number) =>
   request<DocumentSession>(`/projects/${projectKey}/documents/${documentId}/session`, {
     method: 'POST',
-    body: JSON.stringify({ version, contentJson }),
   });
 export const getDocumentChanges = (
   projectKey: string,

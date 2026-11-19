@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { authedApi, type Api } from '#tests/helpers/app';
+import { db, issue, issueStatus } from '@repo/db';
+import { eq, sql } from 'drizzle-orm';
+import { authedApi, type Api, createProject } from '#tests/helpers/app';
 import { signUpTestUser, type TestUser } from '#tests/helpers/auth';
 import { resetDb } from '#tests/helpers/db';
 import { pulseRows } from '../../service';
@@ -17,7 +19,7 @@ import { createAgent } from '#tests/helpers/agents';
 async function setupProject() {
   const owner: TestUser = await signUpTestUser({ name: 'Owner' });
   const asOwner = authedApi(owner.cookie);
-  await asOwner.projects.post({ key: 'MKT', name: 'Marketing' });
+  await createProject(asOwner, { key: 'MKT', name: 'Marketing' });
   const view = await asOwner.projects({ projectKey: 'MKT' }).get();
   const columns = view.data!.columns;
   const col: Record<string, number> = {};
@@ -34,6 +36,7 @@ async function createIssue(
     dueDate?: string | null;
     assigneeUserId?: string | null;
     typeId?: number | null;
+    initiativeId?: number | null;
   } = {},
 ) {
   const { title = 'Task', ...rest } = extra;
@@ -102,6 +105,35 @@ describe('analytics', () => {
 
       const res = await asOwner.projects({ projectKey: 'MKT' }).analytics.stats.get();
       expect(res.data?.unassigned).toBe(1);
+    });
+
+    it('leaves archived issues out of the current figures', async () => {
+      const { asOwner, col } = await setupProject();
+      await createIssue(asOwner, col.backlog);
+      for (const columnId of [col.backlog, col.started]) {
+        const archived = await createIssue(asOwner, columnId, { dueDate: '2000-01-01' });
+        await asOwner.issues({ issueId: archived.id }).archive.post();
+      }
+
+      const res = await asOwner.projects({ projectKey: 'MKT' }).analytics.stats.get();
+      expect(res.data).toMatchObject({
+        open: 1,
+        inProgress: 0,
+        backlog: 1,
+        overdue: 0,
+        unassigned: 1,
+      });
+    });
+
+    it('keeps counting a closing after the issue is archived', async () => {
+      const { asOwner, col } = await setupProject();
+      const closed = await createIssue(asOwner, col.started);
+      await moveIssue(asOwner, closed.id, col.completed);
+      const archived = await asOwner.issues({ issueId: closed.id }).archive.post();
+      expect(archived.data?.archivedAt).toBeTruthy();
+
+      const res = await asOwner.projects({ projectKey: 'MKT' }).analytics.stats.get();
+      expect(res.data?.closedLast7d).toBe(1);
     });
 
     it('counts issues moved to a completed column as closedLast7d', async () => {
@@ -280,6 +312,31 @@ describe('analytics', () => {
       });
     });
 
+    it('leaves archived issues out of every grouping', async () => {
+      const { asOwner, col } = await setupProject();
+      await createIssue(asOwner, col.started, { priority: 'high' });
+      const archived = await createIssue(asOwner, col.started, { priority: 'high' });
+      await asOwner.issues({ issueId: archived.id }).archive.post();
+
+      for (const by of ['status', 'priority', 'type', 'assignee', 'delegate'] as const) {
+        const res = await asOwner.projects({ projectKey: 'MKT' }).analytics.breakdown.get({
+          query: { by },
+        });
+        expect(res.data?.reduce((total, item) => total + item.count, 0)).toBe(1);
+      }
+    });
+
+    it('keeps a column with only archived issues at zero', async () => {
+      const { asOwner, col } = await setupProject();
+      const archived = await createIssue(asOwner, col.started);
+      await asOwner.issues({ issueId: archived.id }).archive.post();
+
+      const res = await asOwner
+        .projects({ projectKey: 'MKT' })
+        .analytics.breakdown.get({ query: { by: 'status' } });
+      expect(res.data?.find((i) => i.key === String(col.started))?.count).toBe(0);
+    });
+
     it('rejects an unknown group-by value', async () => {
       const { asOwner } = await setupProject();
       const res = await asOwner
@@ -416,6 +473,135 @@ describe('analytics', () => {
     });
   });
 
+  describe('burnup', () => {
+    const burnup = (api: Api, query: Record<string, number> = {}) =>
+      api.projects({ projectKey: 'MKT' }).analytics.burnup.get({ query });
+
+    // Treaty turns date-shaped strings into Date objects on the way in; compare the
+    // calendar day.
+    const dayOf = (v: unknown) => new Date(v as string).toISOString().slice(0, 10);
+
+    it('returns a flat zero series and no forecast for an empty project', async () => {
+      const { asOwner } = await setupProject();
+      const res = await burnup(asOwner);
+      expect(res.status).toBe(200);
+      expect(res.data?.days).toHaveLength(90);
+      expect(res.data?.days.at(-1)).toMatchObject({ scope: 0, started: 0, completed: 0 });
+      expect(res.data?.forecast).toEqual({
+        windowDays: 28,
+        velocityPerDay: 0,
+        scopeGrowthPerDay: 0,
+        remaining: 0,
+        projectedScope: 0,
+        projectedDate: null,
+        optimisticDate: null,
+        pessimisticDate: null,
+      });
+      expect(res.data?.targetDate).toBeNull();
+    });
+
+    it('counts the state of every issue at the end of today and projects a date', async () => {
+      const { asOwner, col } = await setupProject();
+      const a = await createIssue(asOwner, col.started);
+      await createIssue(asOwner, col.started);
+      await createIssue(asOwner, col.backlog);
+      await moveIssue(asOwner, a.id, col.completed);
+
+      const res = await burnup(asOwner);
+      expect(res.status).toBe(200);
+      const today = res.data!.days.at(-1)!;
+      expect(today).toMatchObject({ scope: 3, started: 2, completed: 1 });
+      expect(dayOf(today.date)).toBe(dayOf(new Date()));
+      // One closing in the latest of the four weeks, weighted 4 of 10 → 4/70 per
+      // day, two issues left.
+      expect(res.data?.forecast).toMatchObject({ windowDays: 28, remaining: 2 });
+      expect(res.data?.forecast.velocityPerDay).toBeCloseTo(0.06, 2);
+      const { optimisticDate, projectedDate, pessimisticDate } = res.data!.forecast;
+      expect(projectedDate).not.toBeNull();
+      expect(dayOf(projectedDate) > dayOf(today.date)).toBe(true);
+      expect(dayOf(optimisticDate) < dayOf(projectedDate)).toBe(true);
+      expect(dayOf(pessimisticDate) > dayOf(projectedDate)).toBe(true);
+    });
+
+    it('drops canceled issues from the scope and gives no date without closings', async () => {
+      const { asOwner, col } = await setupProject();
+      await createIssue(asOwner, col.backlog);
+      const b = await createIssue(asOwner, col.backlog);
+      await moveIssue(asOwner, b.id, col.canceled);
+
+      const res = await burnup(asOwner);
+      expect(res.status).toBe(200);
+      expect(res.data?.days.at(-1)).toMatchObject({ scope: 1, started: 0, completed: 0 });
+      expect(res.data?.forecast).toMatchObject({ remaining: 1, projectedDate: null });
+    });
+
+    it('drops an issue archived unfinished from the scope and keeps an archived closed one', async () => {
+      const { asOwner, col } = await setupProject();
+      await createIssue(asOwner, col.backlog);
+      const open = await createIssue(asOwner, col.started);
+      const done = await createIssue(asOwner, col.started);
+      await moveIssue(asOwner, done.id, col.completed);
+      await asOwner.issues({ issueId: open.id }).archive.post();
+      await asOwner.issues({ issueId: done.id }).archive.post();
+
+      const res = await burnup(asOwner);
+      expect(res.status).toBe(200);
+      expect(res.data?.days.at(-1)).toMatchObject({ scope: 2, started: 1, completed: 1 });
+      expect(res.data?.forecast.remaining).toBe(1);
+    });
+
+    it('keeps an issue archived unfinished in the scope of the days before it was archived', async () => {
+      const { asOwner, col } = await setupProject();
+      const open = await createIssue(asOwner, col.started);
+      await asOwner.issues({ issueId: open.id }).archive.post();
+      // No route moves a status stretch or an archive into the past, so both are set
+      // directly.
+      await db
+        .update(issueStatus)
+        .set({ enteredAt: sql`now() - interval '3 days'` })
+        .where(eq(issueStatus.issueId, open.id));
+      await db
+        .update(issue)
+        .set({ archivedAt: sql`now() - interval '1 day'` })
+        .where(eq(issue.id, open.id));
+
+      const days = (await burnup(asOwner)).data!.days;
+      expect(days.at(-3)).toMatchObject({ scope: 1, started: 1, completed: 0 });
+      expect(days.at(-2)).toMatchObject({ scope: 0, started: 0 });
+      expect(days.at(-1)).toMatchObject({ scope: 0, started: 0 });
+    });
+
+    it('limits the series to one initiative and returns its target date', async () => {
+      const { asOwner, col } = await setupProject();
+      const created = await asOwner
+        .projects({ projectKey: 'MKT' })
+        .initiatives.post({ title: 'Launch', targetDate: '2030-06-30' });
+      expect(created.status).toBe(201);
+      const initiativeId = created.data!.id;
+      await createIssue(asOwner, col.started, { initiativeId });
+      await createIssue(asOwner, col.started);
+
+      const res = await burnup(asOwner, { initiativeId });
+      expect(res.status).toBe(200);
+      expect(res.data?.days.at(-1)).toMatchObject({ scope: 1, started: 1, completed: 0 });
+      expect(dayOf(res.data?.targetDate)).toBe('2030-06-30');
+    });
+
+    it('returns 404 for an initiative that is not in the project', async () => {
+      const { asOwner } = await setupProject();
+      const res = await burnup(asOwner, { initiativeId: 999999 });
+      expect(res.status).toBe(404);
+    });
+
+    it('clamps the window to at least a week and the forecast window to a week', async () => {
+      const { asOwner } = await setupProject();
+      const res = await burnup(asOwner, { days: 1, forecastWeeks: 0 });
+      expect(res.status).toBe(200);
+      expect(res.data?.days).toHaveLength(7);
+      expect(res.data?.forecast.windowDays).toBe(6);
+    });
+  });
+
   describe('activity', () => {
     it('returns the feed with issue context, newest first', async () => {
       const { asOwner, col } = await setupProject();
@@ -509,6 +695,20 @@ describe('analytics', () => {
         .projects({ projectKey: 'MKT' })
         .analytics.activity.get({ query: { issueIds: 'abc' } });
       expect(none.data?.items).toHaveLength(0);
+    });
+
+    it('limits the feed to a period', async () => {
+      const { asOwner, col } = await setupProject();
+      await createIssue(asOwner, col.started);
+      const past = new Date(Date.now() - 60_000).toISOString();
+      const future = new Date(Date.now() + 60_000).toISOString();
+      const feed = (query: { from?: string; to?: string }) =>
+        asOwner.projects({ projectKey: 'MKT' }).analytics.activity.get({ query });
+
+      expect((await feed({ from: past, to: future })).data?.items).toHaveLength(1);
+      expect((await feed({ from: future })).data?.items).toHaveLength(0);
+      expect((await feed({ to: past })).data?.items).toHaveLength(0);
+      expect((await feed({ from: 'yesterday' })).status).toBe(400);
     });
 
     it('clamps a limit below 1 up to a single item', async () => {
@@ -663,6 +863,22 @@ describe('analytics', () => {
       const row = res.data?.find((r) => r.agentId === agent.id);
       expect(row?.delegatedOpen).toBe(1);
     });
+
+    it('leaves archived issues out of the delegated count', async () => {
+      const { asOwner, col } = await setupProject();
+      const agent = await makeAgent(asOwner, 'helperbot');
+      const open = await createIssue(asOwner, col.started);
+      const archived = await createIssue(asOwner, col.started);
+      await asOwner.issues({ issueId: open.id }).patch({ delegateUserId: agent.userId });
+      await asOwner.issues({ issueId: archived.id }).patch({ delegateUserId: agent.userId });
+      await asOwner.issues({ issueId: archived.id }).archive.post();
+
+      const res = await asOwner
+        .projects({ projectKey: 'MKT' })
+        ['analytics']['agent-workload'].get();
+      const row = res.data?.find((r) => r.agentId === agent.id);
+      expect(row?.delegatedOpen).toBe(1);
+    });
   });
 
   describe('access', () => {
@@ -683,6 +899,7 @@ describe('analytics', () => {
       expect((await scope.analytics.breakdown.get({ query: { by: 'status' } })).status).toBe(403);
       expect((await scope.analytics.pulse.get()).status).toBe(403);
       expect((await scope.analytics.throughput.get()).status).toBe(403);
+      expect((await scope.analytics.burnup.get()).status).toBe(403);
       expect((await scope.analytics.activity.get()).status).toBe(403);
       expect((await scope['analytics']['agent-runs'].get()).status).toBe(403);
       expect((await scope['analytics']['agent-run-stats'].get()).status).toBe(403);
