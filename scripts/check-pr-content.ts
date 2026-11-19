@@ -33,7 +33,7 @@ const AI_ATTRIBUTION_PATTERNS: RegExp[] = [
   // Assistant tool URLs.
   /claude\.(?:ai\/code|com\/claude-code)/i,
   // The tool's generation footer, in English or Spanish, with or without the robot emoji.
-  /(?:🤖\s*)?(generated with|generado con)\s+(claude code|c[oó]digo claude)/i,
+  /(?:\uD83E\uDD16\s*)?(generated with|generado con)\s+(claude code|c[o\u00F3]digo claude)/i,
   // Generic catch: an AI-generation or co-authorship word near an assistant name.
   /(generated|generado|co-authored)[\s\S]{0,40}(claude|copilot|cursor|chatgpt|gpt-4)/i,
 ];
@@ -42,10 +42,27 @@ function hasAIAttribution(line: string): boolean {
   return AI_ATTRIBUTION_PATTERNS.some((pattern) => pattern.test(line));
 }
 
-// This file spells the markers out in its pattern literals, so a line of it that is a
-// lone regex literal is not scanned. A comment or a string in it still is.
+// This file spells the markers out in its pattern literals, so an added line of it that
+// is exactly one of the patterns of the gate that runs (the base branch's copy) is not
+// scanned. Any other line in it is.
 const SELF = 'scripts/check-pr-content.ts';
-const REGEX_LITERAL_LINE = /^\s*\/(?![/*])(?:\\.|[^\\/])+\/[dgimsuyv]*,?\s*$/;
+const REGEX_LITERAL_LINE = /^\s*\/((?:\\.|[^\\/])+)\/([dgimsuyv]*),?\s*$/;
+
+// Compared compiled. Bun rewrites non-ASCII characters of a regex literal as \u escapes,
+// so the patterns spell those characters as escapes to keep source and runtime equal.
+function isTrustedPatternLine(content: string): boolean {
+  const literal = REGEX_LITERAL_LINE.exec(content);
+  if (!literal) return false;
+  let added: RegExp;
+  try {
+    added = new RegExp(literal[1]!, literal[2]);
+  } catch {
+    return false;
+  }
+  return AI_ATTRIBUTION_PATTERNS.some(
+    (pattern) => pattern.source === added.source && pattern.flags === added.flags,
+  );
+}
 
 const violations: Violation[] = [];
 
@@ -76,7 +93,7 @@ for (const hash of hashes) {
 }
 
 const diff = git('diff', '--unified=0', `${baseArg}...${headArg}`);
-let currentPath: string | undefined;
+let currentPath = '';
 let newLineNo = 0;
 let inHunk = false;
 for (const line of diff.split('\n')) {
@@ -85,8 +102,9 @@ for (const line of diff.split('\n')) {
     continue;
   }
   if (!inHunk && line.startsWith('+++ ')) {
+    // Git quotes a path with special characters ("b/a\tb"); that path is still scanned.
     const path = line.slice(4).trim();
-    currentPath = path === '/dev/null' || !path.startsWith('b/') ? undefined : path.slice(2);
+    currentPath = path.startsWith('b/') ? path.slice(2) : path;
     continue;
   }
   if (!inHunk && line.startsWith('--- ')) {
@@ -100,8 +118,8 @@ for (const line of diff.split('\n')) {
   }
   if (inHunk && line.startsWith('+')) {
     const content = line.slice(1);
-    const exempt = currentPath === SELF && REGEX_LITERAL_LINE.test(content);
-    if (currentPath && !exempt && hasAIAttribution(content)) {
+    const exempt = currentPath === SELF && isTrustedPatternLine(content);
+    if (!exempt && hasAIAttribution(content)) {
       violations.push({ path: currentPath, line: newLineNo, text: content.trim() });
     }
     newLineNo++;

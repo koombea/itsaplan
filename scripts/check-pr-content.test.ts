@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -73,9 +73,25 @@ function changeGatePatterns(...lines: string[]): [string, string] {
 }
 
 const MARKER = `co-${'authored'}-by:[^\\n]*\\b${'cla' + 'ude'}\\b`;
+// One of the patterns of the gate that runs, as its source spells it.
+const TRUSTED_PATTERN_LINE = readFileSync(SCRIPT, 'utf8')
+  .split('\n')
+  .find((line) => line.trim().startsWith(`/co-${'authored'}-by:`))!;
 
-test('passes the gate spelling a marker out in one of its own pattern literals', () => {
-  expect(gate(...changeGatePatterns(`  /${MARKER}/i,`))).toBe(0);
+test('passes the gate adding one of its own pattern literals', () => {
+  expect(gate(...changeGatePatterns(TRUSTED_PATTERN_LINE))).toBe(0);
+});
+
+test('rejects a regex literal carrying a marker that is not one of the gate patterns', () => {
+  expect(gate(...changeGatePatterns(`  /${MARKER}/i,`))).toBe(1);
+});
+
+test('rejects attribution in a file whose path git quotes', () => {
+  const base = commit('base.txt', 'chore: base');
+  writeFileSync(join(repo, 'odd\tname.txt'), `${TRAILER}\n`);
+  git('add', '.');
+  git('commit', '-q', '-m', 'chore: add a file');
+  expect(gate(base, git('rev-parse', 'HEAD'))).toBe(1);
 });
 
 test('rejects attribution in a comment among the gate patterns', () => {
