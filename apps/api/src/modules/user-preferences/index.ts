@@ -1,13 +1,12 @@
 import { Elysia } from 'elysia';
-import { requireUser } from '#shared/access';
+import { localeFromAcceptLanguage } from '@repo/mailer';
+import { getProjectAccess, requireUser } from '#shared/access';
 import { authContext } from '#shared/auth-context';
 import { HttpError } from '#shared/lib';
 import { errors } from '#shared/responses';
-import { getMembership } from '#modules/members/service';
 import { getBranding } from '#modules/settings/service';
 import { PreferencePatch, PreferenceResponse } from './model';
 import { getPreferences, isValidTimezone, updatePreferences } from './service';
-import { localeFromAcceptLanguage } from './locale';
 
 // The session user's own interface preferences: timezone, language, theme, how a clicked issue
 // opens, which section the app root lands on, whether the floating AI chat starts
@@ -53,9 +52,7 @@ export const userPreferenceRoutes = new Elysia({
       if (body.timezone !== undefined && !isValidTimezone(body.timezone)) {
         throw new HttpError(400, 'Unknown timezone');
       }
-      // Only a project the user belongs to can be remembered, so the stored id can
-      // never point at one they cannot open.
-      if (body.lastProjectId != null && !(await getMembership(body.lastProjectId, current.id))) {
+      if (body.lastProjectId != null && !(await getProjectAccess(body.lastProjectId, current.id))) {
         throw new HttpError(403, 'You do not have access to this project');
       }
       return updatePreferences(

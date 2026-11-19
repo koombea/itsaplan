@@ -11,12 +11,11 @@ import {
   type ActivityPayload,
   type ActivitySide,
 } from '@repo/db';
-import { and, desc, eq, gte, inArray, isNull, lt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNull, lt, ne, sql } from 'drizzle-orm';
 import { HttpError, iso } from '#shared/lib';
-import { emitWebhookEvent } from '#modules/webhooks/emit';
+import { emitCommentEvent } from './webhook-payload';
 import { addedMentionHandles, parseMentionHandles, resolveMentionHandles } from '#shared/mentions';
-import { isAgentUser, listMentionTriggerAgents } from '#modules/agents/core/service';
-import { enqueueAgentRun } from '#modules/agents/core/run-queue';
+import { mentionReach, queueMentionRuns } from '#modules/mentions/service';
 import {
   notifyComment,
   notifyEditedCommentMentions,
@@ -24,6 +23,7 @@ import {
   notifyTextMentions,
 } from '#modules/notifications/service';
 import { listStatusTimeline } from './status-history';
+import { listReactions, type CommentReactionRow } from './reactions';
 
 // Issue timeline: comments and change-log activity in one table (issue_activity).
 // kind selects which columns a row uses. The author is the session user
@@ -48,6 +48,8 @@ export interface FeedItemRow {
   createdAt: string;
   // Set once a comment is edited; null while it is in its author's original words.
   editedAt: string | null;
+  // The emoji reactions of a comment; empty on a change-log entry.
+  reactions: CommentReactionRow[];
 }
 
 // Opaque page cursor: the (created_at, id) of the last returned item. id breaks
@@ -89,20 +91,56 @@ function mapFeedItem(row: {
     payload: row.payload,
     createdAt: iso(row.createdAt),
     editedAt: row.editedAt ? iso(row.editedAt) : null,
+    reactions: [],
   };
 }
 
-// One page of an issue's feed, newest first. The page is a window over the
-// top-level entries; the replies of the comments in it follow at the end of items,
-// however deep they are nested, so a thread is never split across pages. cursor_ts
-// is created_at as full-precision text so the returned nextCursor round-trips
-// without the millisecond truncation iso() would apply. limit is clamped to 1..100.
-export async function listFeed(
-  issueId: number,
-  opts: { before?: FeedCursor | null; limit?: number } = {},
-): Promise<FeedPage> {
+// Fills in the reactions of the comments among the given entries, in one query.
+async function withReactions(items: FeedItemRow[]): Promise<FeedItemRow[]> {
+  const reactions = await listReactions(
+    items.filter((item) => item.kind === 'comment').map((item) => item.id),
+  );
+  return items.map((item) => ({ ...item, reactions: reactions.get(item.id) ?? [] }));
+}
+
+export type FeedFilter = 'comments' | 'history' | 'worklog';
+export type FeedOrder = 'asc' | 'desc';
+
+export interface FeedPageOptions {
+  cursor?: FeedCursor | null;
+  limit?: number;
+  // Narrows the page to one tab of the activity log; absent serves every entry.
+  filter?: FeedFilter;
+  order?: FeedOrder;
+}
+
+// The change log is split into the time spent on the issue (its work log) and the
+// rest of its history.
+function feedFilterCondition(filter?: FeedFilter) {
+  switch (filter) {
+    case 'comments':
+      return eq(issueActivity.kind, 'comment');
+    case 'worklog':
+      return and(eq(issueActivity.kind, 'activity'), eq(issueActivity.action, 'worklog'));
+    case 'history':
+      return and(eq(issueActivity.kind, 'activity'), ne(issueActivity.action, 'worklog'));
+    default:
+      return undefined;
+  }
+}
+
+// One page of an issue's feed, newest first unless `order` is 'asc'. The page is a
+// window over the top-level entries; the replies of the comments in it follow at the
+// end of items, however deep they are nested, so a thread is never split across
+// pages. cursor_ts is created_at as full-precision text so the returned nextCursor
+// round-trips without the millisecond truncation iso() would apply. limit is clamped
+// to 1..100.
+export async function listFeed(issueId: number, opts: FeedPageOptions = {}): Promise<FeedPage> {
   const limit = Math.min(Math.max(opts.limit ?? 25, 1), 100);
-  const before = opts.before ?? null;
+  const cursor = opts.cursor ?? null;
+  const ascending = opts.order === 'asc';
+  const direction = ascending ? asc : desc;
+  const pastCursor = sql.raw(ascending ? '>' : '<');
   const rows = await db
     .select({
       id: issueActivity.id,
@@ -123,12 +161,13 @@ export async function listFeed(
       and(
         eq(issueActivity.issueId, issueId),
         isNull(issueActivity.replyToId),
-        before
-          ? sql`(${issueActivity.createdAt}, ${issueActivity.id}) < (${before.ts}::timestamptz, ${before.id}::integer)`
+        feedFilterCondition(opts.filter),
+        cursor
+          ? sql`(${issueActivity.createdAt}, ${issueActivity.id}) ${pastCursor} (${cursor.ts}::timestamptz, ${cursor.id}::integer)`
           : undefined,
       ),
     )
-    .orderBy(desc(issueActivity.createdAt), desc(issueActivity.id))
+    .orderBy(direction(issueActivity.createdAt), direction(issueActivity.id))
     .limit(limit + 1);
 
   const hasMore = rows.length > limit;
@@ -137,9 +176,39 @@ export async function listFeed(
   const items = page.map(mapFeedItem);
   const replies = await listReplies(items.map((item) => item.id));
   return {
-    items: [...items, ...replies],
+    items: await withReactions([...items, ...replies]),
     nextCursor: hasMore && last ? { ts: last.cursorTs, id: last.id } : null,
   };
+}
+
+// How many entries each tab of the activity log holds. A reply is a comment and
+// counts as one.
+export interface FeedCounts {
+  all: number;
+  comments: number;
+  history: number;
+  worklog: number;
+}
+
+export async function countFeed(issueId: number): Promise<FeedCounts> {
+  const [counts] = await db
+    .select({
+      comments: sql<number>`count(*) FILTER (WHERE ${issueActivity.kind} = 'comment')`.mapWith(
+        Number,
+      ),
+      worklog:
+        sql<number>`count(*) FILTER (WHERE ${issueActivity.kind} = 'activity' AND ${issueActivity.action} = 'worklog')`.mapWith(
+          Number,
+        ),
+      history:
+        sql<number>`count(*) FILTER (WHERE ${issueActivity.kind} = 'activity' AND ${issueActivity.action} <> 'worklog')`.mapWith(
+          Number,
+        ),
+    })
+    .from(issueActivity)
+    .where(eq(issueActivity.issueId, issueId));
+  const { comments, worklog, history } = counts;
+  return { all: comments + worklog + history, comments, history, worklog };
 }
 
 // Every reply under the given entries, oldest first, read one level at a time until
@@ -187,7 +256,7 @@ export async function listFeedRange(
       ),
     )
     .orderBy(issueActivity.createdAt, issueActivity.id);
-  return rows.map(mapFeedItem);
+  return withReactions(rows.map(mapFeedItem));
 }
 
 // One stretch of the grouped feed: the status the issue was in, and the entries of
@@ -207,14 +276,14 @@ export interface GroupedFeedPage {
   nextCursor: FeedCursor | null;
 }
 
-// The feed split into the stretches the issue spent in one column, newest first. The
-// page is the window of entries listFeed serves, under the same keyset cursor, so a
-// long history is read page by page rather than whole; a stretch that spans a page
-// boundary is served in both, each time with the entries of that page. A stretch in
-// which nothing was written carries no entries and so gets no group.
+// The feed split into the stretches the issue spent in one column, in the order the
+// page runs. The page is the window of entries listFeed serves, under the same keyset
+// cursor, so a long history is read page by page rather than whole; a stretch that
+// spans a page boundary is served in both, each time with the entries of that page. A
+// stretch in which nothing was written carries no entries and so gets no group.
 export async function listGroupedFeed(
   issueId: number,
-  opts: { before?: FeedCursor | null; limit?: number } = {},
+  opts: FeedPageOptions = {},
 ): Promise<GroupedFeedPage> {
   const page = await listFeed(issueId, opts);
   const timeline = page.items.length ? await listStatusTimeline(issueId) : [];
@@ -231,9 +300,10 @@ export async function listGroupedFeed(
   // A reply joins the group of the thread it hangs under, wherever the issue stood
   // when it was written, so the thread stays whole.
   const groupByItemId = new Map<number, FeedGroup>();
-  // The entries run newest first and the segments oldest first, so the segment the
-  // walk sits on only ever moves back towards the start.
-  let index = segments.length - 1;
+  // The segments run oldest first. Newest-first entries move the walk back towards
+  // the start, oldest-first ones forward towards the end, never both.
+  const ascending = opts.order === 'asc';
+  let index = ascending ? 0 : segments.length - 1;
   for (const item of page.items) {
     if (item.replyToId != null) {
       const group = groupByItemId.get(item.replyToId);
@@ -243,7 +313,11 @@ export async function listGroupedFeed(
       continue;
     }
     const at = Date.parse(item.createdAt);
-    while (index > 0 && Date.parse(segments[index].from) > at) index--;
+    if (ascending) {
+      while (index < segments.length - 1 && Date.parse(segments[index + 1].from) <= at) index++;
+    } else {
+      while (index > 0 && Date.parse(segments[index].from) > at) index--;
+    }
     const segment = segments[index];
     const open = groups[groups.length - 1];
     if (open && open.from === segment.from) {
@@ -264,9 +338,12 @@ export async function createComment(input: {
   body: string;
   // The comment being replied to. It has to be a comment on the same issue.
   replyToId?: number | null;
+  // The name of an author without an account, such as someone writing in through a
+  // build's public page. Their mentions reach nobody: they are not in the team.
+  authorName?: string;
 }): Promise<FeedItemRow> {
   const actorUserId = input.actorUserId ?? null;
-  const actorName = await userName(actorUserId);
+  const actorName = input.authorName ?? (await userName(actorUserId));
   const replyToId = input.replyToId ?? null;
   if (replyToId != null) {
     const [parent] = await db
@@ -295,11 +372,11 @@ export async function createComment(input: {
     .where(eq(issue.id, input.issueId));
   const projectId = projectRows[0]?.projectId;
   if (projectId != null) {
-    await emitWebhookEvent(projectId, 'comment.created', comment);
+    await emitCommentEvent(projectId, 'comment.created', comment, actorUserId);
     // Resolved once: the agent halves start runs, the member half is notified.
     const mentioned = await resolveMentionHandles(
       projectId,
-      parseMentionHandles(comment.body ?? ''),
+      input.authorName === undefined ? parseMentionHandles(comment.body ?? '') : [],
     );
     await enqueueMentionRuns(projectId, comment, mentioned.agentUserIds);
     await notifyComment(projectId, comment, mentioned);
@@ -352,10 +429,10 @@ export async function updateComment(
     .where(eq(issueActivity.id, commentId))
     .returning();
   if (!row) throw new HttpError(404, 'Comment not found');
-  const comment = mapFeedItem(row);
+  const [comment] = await withReactions([mapFeedItem(row)]);
 
   await recordActivity(comment.issueId, [{ action: 'comment_edited' }], actorUserId);
-  await emitWebhookEvent(projectId, 'comment.updated', comment);
+  await emitCommentEvent(projectId, 'comment.updated', comment, actorUserId);
 
   const added = addedMentionHandles(before.body ?? '', body);
   if (added.length > 0) {
@@ -382,9 +459,11 @@ export async function deleteComment(
     .from(issueActivity)
     .where(and(eq(issueActivity.id, commentId), eq(issueActivity.kind, 'comment')));
   if (!before) return false;
+  // Read first: the reactions are deleted with the comment.
+  const [comment] = await withReactions([mapFeedItem(before)]);
   await db.delete(issueActivity).where(eq(issueActivity.id, commentId));
-  await recordActivity(before.issueId as number, [{ action: 'comment_deleted' }], actorUserId);
-  await emitWebhookEvent(projectId, 'comment.deleted', mapFeedItem(before));
+  await recordActivity(comment.issueId, [{ action: 'comment_deleted' }], actorUserId);
+  await emitCommentEvent(projectId, 'comment.deleted', comment, actorUserId);
   return true;
 }
 
@@ -393,17 +472,13 @@ export async function deleteComment(
 // so answering an agent in its own thread does not have to tag it again. Only quick
 // queries run here; the work happens later — in the poller for an internal agent, on
 // the operator's runner for an external one — so creating a comment is never blocked
-// on it. Comments authored by an agent's bot user never trigger runs, which stops
-// agents from setting each other (or themselves) off.
+// on it.
 async function enqueueMentionRuns(
   projectId: number,
   comment: FeedItemRow,
   mentionedAgentUserIds: string[],
 ): Promise<void> {
   if (mentionedAgentUserIds.length === 0 && comment.replyToId == null) return;
-  // A comment an agent wrote starts no run of its own, which stops agent-to-agent
-  // mention loops.
-  if (comment.actorUserId && (await isAgentUser(comment.actorUserId))) return;
   const reachedUserIds = new Set(mentionedAgentUserIds);
   if (comment.replyToId != null) {
     const [parent] = await db
@@ -412,20 +487,19 @@ async function enqueueMentionRuns(
       .where(eq(issueActivity.id, comment.replyToId));
     if (parent?.actorUserId) reachedUserIds.add(parent.actorUserId);
   }
-  const agents = await listMentionTriggerAgents(
+  const { agents } = await mentionReach(
     projectId,
-    [...reachedUserIds],
     comment.actorUserId,
+    { on: 'issue', place: 'comment' },
+    { memberIds: [], agentUserIds: [...reachedUserIds] },
   );
-  for (const agent of agents) {
-    await enqueueAgentRun({
-      agentId: agent.id,
-      projectId,
-      issueId: comment.issueId,
-      sourceActivityId: comment.id,
-      prompt: comment.body ?? '',
-    });
-  }
+  await queueMentionRuns({
+    projectId,
+    actorUserId: comment.actorUserId,
+    agents,
+    prompt: comment.body ?? '',
+    source: { issueId: comment.issueId, sourceActivityId: comment.id },
+  });
 }
 
 // --- Activity log ----------------------------------------------------------------

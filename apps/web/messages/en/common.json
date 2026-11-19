@@ -14,7 +14,8 @@
   "name": "Name",
   "edit": "Edit",
   "language": "Language",
-  "toggleTheme": "Toggle theme",
+  "interface": "Interface",
+  "allPreferences": "All preferences",
   "priority": {
     "label": "Priority",
     "tooltip": "{priority} priority",
@@ -40,25 +41,26 @@
   "brandSubtitle": "Plan issues on a board. Sign in to open your projects.",
   "hotkeys": {
     "pressKeys": "Press keys",
-    "fixed": "Fixed",
-    "resetShortcut": "Reset this shortcut",
+    "fixed": "Cannot be changed",
+    "changeShortcut": "Change shortcut: {command}",
+    "resetShortcut": "Reset shortcut: {command}",
     "groups": {
       "general": "General",
       "workItems": "Work items"
     },
     "commands": {
       "palette": {
-        "toggle": "Open the command palette"
+        "toggle": "Open command palette"
       },
       "project": {
         "new": "New project",
         "settings": "Open project settings"
       },
       "sidebar": {
-        "toggle": "Show or hide the sidebar"
+        "toggle": "Show or hide sidebar"
       },
       "chat": {
-        "toggle": "Show or hide the AI chat"
+        "toggle": "Show or hide AI chat"
       },
       "issue": {
         "new": "New issue"
@@ -76,7 +78,7 @@
         "select-all": "Select all issues on the board"
       }
     },
-    "conflict": "Already used by {command}"
+    "conflict": "Also used by {command}. Change one of them."
   },
   "agentChat": {
     "emptyHint": "Send a message to test how this agent replies and which tools it uses.",
@@ -101,6 +103,8 @@
     "unreachable": "Could not reach the agent. Try again.",
     "runnerOffline": "Runner offline",
     "runnerOfflineHint": "Start the runner on your machine to chat with this agent.",
+    "chatDisabled": "This agent is not available in chat",
+    "chatDisabledHint": "Chat is turned off for this agent. Mentions, delegations, and schedules still work.",
     "attachFile": "Attach a spreadsheet, document, PDF, or text file for the agent to read",
     "removeAttachment": "Remove attachment",
     "uploadFailed": "Could not upload the file.",
@@ -131,15 +135,48 @@
     "shareLink": "Share link",
     "fullDetails": "Full issue details",
     "fullDetailsHint": "Assignees, labels, custom fields and activity.",
+    "includeSubpages": "Include subpages",
+    "includeSubpagesHint": "Anyone with the link can also read the pages below this one.",
+    "includeIssues": "Show linked issues",
+    "includeIssuesHint": "The issues of this project that the pages name show their title and state, and open read-only: description, state, type, priority and dates. No comments and no people.",
+    "throughDocuments": "Public through shared documents",
+    "throughDocumentsHint": "These shared pages name this issue and show linked issues, so it can be read through their links.",
+    "overviewTitle": "Public",
+    "overviewDescription": "Everything in this project that anyone with the link can read, and when each link stops working.",
+    "overviewEmpty": "Nothing in this project is shared publicly.",
+    "overviewClosed": "Public links are turned off for this project. These links do not open until they are on again. You can still revoke them.",
+    "overviewDocuments": "Documents",
+    "overviewIssues": "Issues",
+    "overviewViews": "Views",
+    "revokeAll": "Revoke all links",
+    "revokeAllTitle": "Revoke all public links?",
+    "revokeAllHint": "Every public link in this project that you may change stops working at once. Sharing again creates new links.",
+    "revokeAllDone": "{count, plural, =0 {No link revoked} one {# link revoked} other {# links revoked}}",
     "stopSharing": "Stop sharing",
     "createLink": "Create link",
     "copy": "Copy",
-    "copied": "Copied"
+    "copied": "Copied",
+    "calendarFeed": "Calendar feed",
+    "calendarFeedHint": "Copy this link into your calendar app to subscribe to this view.",
+    "expiry": "Expiry",
+    "expiryHint": "The link stops working after this.",
+    "neverExpires": "Never expires",
+    "expiresInDays": "{count, plural, one {In # day} other {In # days}}",
+    "expiresOn": "Until {date}",
+    "expiryPickDate": "Or pick the last day:",
+    "expiryFailed": "Could not change when the link expires. Try again."
   },
   "actions": "Actions",
   "clearSearch": "Clear search",
   "hide": "Hide",
   "show": "Show",
+  "filter": "Filter",
+  "filterBy": "Filter by",
+  "clearFilters": "Clear filters",
+  "removeFilter": "Remove the {filter} filter",
+  "search": "Search",
+  "nothingFound": "Nothing found",
+  "shownFilters": "Shown:",
   "copy": "Copy",
   "copied": "Copied",
   "change": "Change",
@@ -198,11 +235,74 @@
     "copiedLink": "Copied",
     "editLink": "Edit link",
     "retryPreview": "Try again",
-    "copyLinkFailed": "Could not copy the link. Select and copy the URL above."
+    "copyLinkFailed": "Could not copy the link. Select and copy the URL above.",
+    "todoList": "To-do list"
   },
   "chart": {
     "download": "Save chart",
     "downloadFailed": "The chart could not be saved"
+  },
+  "attachmentPreview": {
+    "failed": "The preview did not open. Download the file to view it.",
+    "tooLarge": "This file is too large to preview. Download it to view it.",
+    "empty": "This file is empty.",
+    "download": "Download"
+  },
+  "documentViewer": {
+    "thumbnails": "Thumbnails",
+    "pages": "Pages",
+    "document": "Document",
+    "page": "Page {page}",
+    "pageOf": "Page <control></control> of {count}",
+    "pageNumber": "Page number",
+    "currentPage": "Page {page}. Go to another page",
+    "slides": "Slides",
+    "presentation": "Presentation",
+    "slide": "Slide {slide}",
+    "slideOf": "Slide <control></control> of {count}",
+    "slideNumber": "Slide number",
+    "currentSlide": "Slide {slide}. Go to another slide",
+    "previousSlide": "Previous slide",
+    "nextSlide": "Next slide",
+    "noSlides": "This presentation has no slides.",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "zoomLevel": "Zoom level",
+    "fitPage": "Fit page",
+    "fitWidth": "Fit width",
+    "automatic": "Automatic",
+    "rotateClockwise": "Rotate clockwise",
+    "rotateCounterclockwise": "Rotate counterclockwise",
+    "search": "Search",
+    "searching": "Searching…",
+    "searchHint": "Type to search",
+    "noResults": "No results",
+    "previousResult": "Previous result",
+    "nextResult": "Next result",
+    "clear": "Clear",
+    "moreActions": "More actions",
+    "darkMode": "Dark mode",
+    "comments": "Comments",
+    "edits": "Edits",
+    "download": "Download",
+    "upload": "Upload",
+    "uploadPrompt": "Upload a file to preview it",
+    "loading": "Loading",
+    "loadFailed": "The file could not be displayed",
+    "fileTooLarge": "File too large",
+    "fileTooLargeHint": "This workbook is over the display limit. Download it to view the whole file.",
+    "columnMenu": "Column menu",
+    "sortAscending": "Sort ascending",
+    "sortDescending": "Sort descending",
+    "sheetPreview": "Preview of {sheet}",
+    "inserted": "Inserted",
+    "removed": "Removed",
+    "movedFrom": "Moved from",
+    "movedTo": "Moved to",
+    "unknownAuthor": "Unknown author",
+    "resolved": "Resolved",
+    "reply": "Reply",
+    "comment": "Comment"
   },
   "agent": "Agent",
   "pager": {
@@ -211,5 +311,7 @@
     "page": "Page {number}",
     "perPage": "per page",
     "range": "{first}-{last} of {total}"
-  }
+  },
+  "upgradeToPro": "Upgrade to Pro",
+  "signingOut": "Signing out…"
 }

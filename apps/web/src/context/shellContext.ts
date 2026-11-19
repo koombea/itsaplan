@@ -20,11 +20,19 @@ export type ShellContext = {
   // between the side panel and the issue page; pass it to force one of them.
   onOpenIssue: (id: number, mode?: IssueOpenMode) => void;
   onAddIssue: (defaults: NewIssueDefaults) => void;
+  // What the work items board's filters put on a new issue. onAddIssue applies
+  // them already.
+  newIssueDefaults: NewIssueDefaults;
   // Opens the chat panel on a new conversation with the agent.
   onChatWithAgent: (agentId: number) => void;
 };
 
 export const ShellCtx = createContext<ShellContext | null>(null);
+
+// The Shell's onOpenIssue on its own. ShellCtx changes on every Shell render, while
+// this changes only with the project and the open-mode preference, so a component
+// that every card mounts reads this one.
+export const IssueOpenerCtx = createContext<ShellContext['onOpenIssue'] | null>(null);
 
 export function useShell(): ShellContext {
   const ctx = useContext(ShellCtx);

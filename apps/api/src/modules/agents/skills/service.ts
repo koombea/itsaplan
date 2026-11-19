@@ -1,6 +1,7 @@
 import { db, agentSkill, agentSkillLink } from '@repo/db';
-import { and, eq, inArray, sql } from 'drizzle-orm';
-import { iso, rethrowDuplicate, HttpError } from '#shared/lib';
+import { and, eq, ilike, inArray, or, sql } from 'drizzle-orm';
+import { transliterate } from 'transliteration';
+import { iso, rethrowDuplicate, HttpError, likePattern } from '#shared/lib';
 import { putObject, getObjectText, deleteObjects } from '@repo/storage';
 import { parseFrontmatter, isDisallowedRef } from './skill-format';
 
@@ -66,12 +67,23 @@ function skillMdKey(prefix: string): string {
   return `${prefix}/SKILL.md`;
 }
 
-// One page of the team's skill library, by name, with how many it holds in total.
+// One page of the team's skill library, by name, with how many match in all.
 export async function listSkills(
   teamId: number,
   window: { limit: number; offset: number },
+  filter: { search?: string; sources?: string[] },
 ): Promise<{ items: SkillRow[]; total: number }> {
-  const where = eq(agentSkill.teamId, teamId);
+  const term = filter.search?.trim();
+  const where = and(
+    eq(agentSkill.teamId, teamId),
+    filter.sources ? inArray(agentSkill.source, filter.sources) : undefined,
+    term
+      ? or(
+          ilike(agentSkill.name, likePattern(term)),
+          ilike(agentSkill.description, likePattern(term)),
+        )
+      : undefined,
+  );
   const [rows, counted] = await Promise.all([
     db
       .select(dtoColumns)
@@ -261,7 +273,8 @@ export async function updateSkill(
 }
 
 // Adds a reference file to a skill. Rejects executable files (no scripts in a
-// skill). The path is the sanitized file name under refs/.
+// skill). The path is the file name under refs/, transliterated so a name in another
+// script does not turn into underscores only.
 export async function addReference(
   id: number,
   teamId: number,
@@ -269,7 +282,7 @@ export async function addReference(
   bytes: Buffer,
   contentType: string,
 ): Promise<SkillRow | null> {
-  const safeName = filename.replace(/[^A-Za-z0-9._-]/g, '_');
+  const safeName = transliterate(filename).replace(/[^A-Za-z0-9._-]/g, '_');
   if (!safeName || isDisallowedRef(safeName)) {
     throw new HttpError(400, 'This file type is not allowed as a skill reference');
   }
@@ -326,10 +339,23 @@ export async function deleteSkill(id: number, teamId: number): Promise<boolean> 
     .where(and(eq(agentSkill.id, id), eq(agentSkill.teamId, teamId)));
   const skill = rows[0];
   if (!skill) return false;
-  const keys = [skillMdKey(skill.s3Prefix), ...(skill.files as SkillRef[]).map((f) => f.s3Key)];
-  await deleteObjects(keys);
+  await deleteObjects(skillObjectKeys(skill));
   await db.delete(agentSkill).where(eq(agentSkill.id, id));
   return true;
+}
+
+function skillObjectKeys(skill: { s3Prefix: string; files: unknown }): string[] {
+  return [skillMdKey(skill.s3Prefix), ...(skill.files as SkillRef[]).map((f) => f.s3Key)];
+}
+
+// The object-store keys of every skill of the team. Read them before the team is
+// deleted: the cascade removes the rows that name them.
+export async function teamSkillObjectKeys(teamId: number): Promise<string[]> {
+  const skills = await db
+    .select({ s3Prefix: agentSkill.s3Prefix, files: agentSkill.files })
+    .from(agentSkill)
+    .where(eq(agentSkill.teamId, teamId));
+  return skills.flatMap(skillObjectKeys);
 }
 
 // The skills enabled on an agent, as DTOs. Used by the agent editor and the runtime.

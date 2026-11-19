@@ -1,5 +1,7 @@
 import { t } from 'elysia';
 import { ActivityPayloadResponse } from '#shared/activity';
+import { agentRunTrigger } from '#modules/agents/model';
+import { instantQuery } from '#shared/schemas';
 
 export const StatsDto = t.Object({
   open: t.Number(),
@@ -26,6 +28,28 @@ const ThroughputWeek = t.Object({
   week: t.String(),
   created: t.Number(),
   closed: t.Number(),
+});
+
+const BurnupDay = t.Object({
+  date: t.String(),
+  scope: t.Number(),
+  started: t.Number(),
+  completed: t.Number(),
+});
+
+export const BurnupDto = t.Object({
+  days: t.Array(BurnupDay),
+  forecast: t.Object({
+    windowDays: t.Number(),
+    velocityPerDay: t.Number(),
+    scopeGrowthPerDay: t.Number(),
+    remaining: t.Number(),
+    projectedScope: t.Number(),
+    projectedDate: t.Nullable(t.String()),
+    optimisticDate: t.Nullable(t.String()),
+    pessimisticDate: t.Nullable(t.String()),
+  }),
+  targetDate: t.Nullable(t.String()),
 });
 
 const ActivityItem = t.Object({
@@ -55,13 +79,7 @@ export const ActivityPage = t.Object({
 const AgentRunFeedItem = t.Object({
   id: t.Number(),
   status: t.String(),
-  trigger: t.Union([
-    t.Literal('mention'),
-    t.Literal('delegation'),
-    t.Literal('field'),
-    t.Literal('schedule'),
-    t.Literal('manual'),
-  ]),
+  trigger: agentRunTrigger,
   agentId: t.Number(),
   agentName: t.String(),
   issueId: t.Nullable(t.Number()),
@@ -124,11 +142,23 @@ export const pulseQuery = t.Object({
 
 export const throughputQuery = t.Object({ weeks: t.Optional(t.Numeric()) });
 
+export const burnupQuery = t.Object({
+  days: t.Optional(t.Numeric()),
+  initiativeId: t.Optional(t.Numeric()),
+  forecastWeeks: t.Optional(t.Numeric()),
+});
+
 export const activityQuery = t.Object({
-  limit: t.Optional(t.Numeric()),
-  cursor: t.Optional(t.String()),
+  limit: t.Optional(t.Numeric({ description: '1-100. Default 25.' })),
+  cursor: t.Optional(
+    t.String({ description: 'nextCursor from the previous page, as a JSON string.' }),
+  ),
   actorUserId: t.Optional(t.String()),
-  action: t.Optional(t.String()),
+  action: t.Optional(
+    t.String({ description: "Change-log action, such as 'created' or 'status'." }),
+  ),
+  from: instantQuery('At or after this'),
+  to: instantQuery('Before this'),
   // Comma-separated issue ids the client resolved from the widget's work items
   // filter; absent means no issue-scope restriction.
   issueIds: t.Optional(t.String()),

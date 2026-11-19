@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
 import { db, agentRun } from '@repo/db';
 import { eq } from 'drizzle-orm';
-import { authedApi, type Api } from '#tests/helpers/app';
+import { authedApi, type Api, createProject } from '#tests/helpers/app';
 import { signUpTestUser } from '#tests/helpers/auth';
 import { resetDb } from '#tests/helpers/db';
 import { createAgent, teamOf } from '#tests/helpers/agents';
@@ -22,7 +22,7 @@ import {
 async function setup() {
   const owner = await signUpTestUser({ name: 'Owner' });
   const asOwner = authedApi(owner.cookie);
-  await asOwner.projects.post({ key: 'MKT', name: 'Marketing' });
+  await createProject(asOwner, { key: 'MKT', name: 'Marketing' });
   const view = await asOwner.projects({ projectKey: 'MKT' }).get();
   const columnId = view.data!.columns[0].id;
   return { asOwner, columnId };
@@ -77,6 +77,36 @@ describe('agent_run queue store', () => {
     // A second immediate claim finds nothing due — the lease is still held.
     const second = await claimDueRuns();
     expect(second.find((r) => r.id === runId)).toBeUndefined();
+  });
+
+  it('runs the runs of one agent on one issue one at a time, oldest first', async () => {
+    const { asOwner, columnId } = await setup();
+    const { agent, issue, runId } = await enqueueRun(asOwner, columnId);
+    const run = {
+      agentId: agent.id,
+      projectId: agent.projects[0].id,
+      sourceActivityId: null,
+      prompt: 'and this',
+    };
+    await enqueueAgentRun({ ...run, issueId: issue.id });
+    const other = (
+      await asOwner.projects({ projectKey: 'MKT' }).issues.post({ columnId, title: 'Other' })
+    ).data!;
+    await enqueueAgentRun({ ...run, issueId: other.id });
+    const [second, onOther] = await db
+      .select()
+      .from(agentRun)
+      .where(eq(agentRun.agentId, agent.id))
+      .orderBy(agentRun.id)
+      .then((rows) => rows.slice(1));
+
+    // The older run of the issue and the run of the other issue go together.
+    expect((await claimDueRuns()).map((r) => r.id).sort()).toEqual([runId, onOther.id].sort());
+    // The newer run of the issue waits while the older one is in flight.
+    expect(await claimDueRuns()).toEqual([]);
+
+    await markRunSuccess(runId, 'done', null);
+    expect((await claimDueRuns()).map((r) => r.id)).toEqual([second.id]);
   });
 
   it('counts the in-flight runs a run waits behind', async () => {
@@ -145,5 +175,30 @@ describe('agent_run queue store', () => {
     const { runId } = await enqueueRun(asOwner, columnId);
     await markRunFailed(runId, 'x'.repeat(600));
     expect((await readRun(runId)).lastError).toHaveLength(500);
+  });
+
+  it('saves the start of an output up to the instance answer limit', async () => {
+    const { asOwner, columnId } = await setup();
+    await asOwner.god['agent-settings'].put({ maxAnswerChars: 4 });
+    const { runId } = await enqueueRun(asOwner, columnId);
+    await markRunSuccess(runId, 'done and more', null);
+    expect((await readRun(runId)).output).toBe('done');
+  });
+
+  it('saves the start of a failed run output up to the instance answer limit', async () => {
+    const { asOwner, columnId } = await setup();
+    await asOwner.god['agent-settings'].put({ maxAnswerChars: 4 });
+    const { runId } = await enqueueRun(asOwner, columnId);
+    await markRunFailed(runId, 'Timed out', 'half of it');
+    expect(await readRun(runId)).toMatchObject({ lastError: 'Timed out', output: 'half' });
+  });
+
+  it('saves an output whole when the answer limit is 0', async () => {
+    const { asOwner, columnId } = await setup();
+    await asOwner.god['agent-settings'].put({ maxAnswerChars: 0 });
+    const { runId } = await enqueueRun(asOwner, columnId);
+    const output = 'x'.repeat(250_000);
+    await markRunSuccess(runId, output, null);
+    expect((await readRun(runId)).output).toBe(output);
   });
 });

@@ -1,60 +1,36 @@
 'use client';
 
-import { toast } from 'sonner';
-import { useTranslations } from 'next-intl';
-import SettingsCard from '@/components/common/page/SettingsCard';
-import SettingsRow from '@/components/common/page/SettingsRow';
-import SettingsSection from '@/components/common/page/SettingsSection';
-import { Switch } from '@/components/ui/switch';
-import GodSectionPage from './components/GodSectionPage';
 import GodSettingsGate from './components/GodSettingsGate';
+import GodGeneralForm from './components/general/GodGeneralForm';
 import {
+  useInstanceAgentSettingsQuery,
+  useInstanceApiDocsSettingsQuery,
+  useInstanceApiKeySettingsQuery,
+  useInstanceAuthSettingsQuery,
+  useInstanceEmbedSitesQuery,
   useInstanceProjectDefaultsQuery,
-  useUpdateInstanceProjectDefaults,
+  useInstanceSharingSettingsQuery,
 } from './services/god.service';
-import type { ProjectDefaults } from '@/lib/api/endpoints/projects';
 
 export default function GodGeneralPage() {
-  const query = useInstanceProjectDefaultsQuery();
+  const defaults = useInstanceProjectDefaultsQuery().data;
+  const auth = useInstanceAuthSettingsQuery().data;
+  const agents = useInstanceAgentSettingsQuery().data;
+  const embed = useInstanceEmbedSitesQuery().data;
+  const sharing = useInstanceSharingSettingsQuery().data;
+  const apiDocs = useInstanceApiDocsSettingsQuery().data;
+  const apiKeys = useInstanceApiKeySettingsQuery().data;
 
   return (
-    <GodSettingsGate slug="general" data={query.data}>
-      {(defaults) => <GeneralForm defaults={defaults} />}
+    <GodSettingsGate
+      slug="general"
+      data={
+        defaults && auth && agents && embed && sharing && apiDocs && apiKeys
+          ? { defaults, auth, agents, embed, sharing, apiDocs, apiKeys }
+          : undefined
+      }
+    >
+      {(data) => <GodGeneralForm {...data} />}
     </GodSettingsGate>
-  );
-}
-
-function GeneralForm({ defaults }: { defaults: ProjectDefaults }) {
-  const t = useTranslations('god.general');
-  const update = useUpdateInstanceProjectDefaults();
-
-  // A single toggle, so it saves on change rather than behind a Save button.
-  async function setMcpEnabled(mcpEnabled: boolean) {
-    try {
-      await update.mutateAsync({ ...defaults, mcpEnabled });
-      toast.success(t('saved'));
-    } catch {
-      // The failure already surfaced through the global mutation error toast.
-    }
-  }
-
-  return (
-    <GodSectionPage slug="general">
-      <SettingsSection title={t('projectDefaults')}>
-        <SettingsCard>
-          <SettingsRow
-            title={t('mcpEnabled')}
-            description={t('mcpEnabledHint')}
-            control={
-              <Switch
-                checked={defaults.mcpEnabled}
-                disabled={update.isPending}
-                onCheckedChange={(checked) => void setMcpEnabled(checked)}
-              />
-            }
-          />
-        </SettingsCard>
-      </SettingsSection>
-    </GodSectionPage>
   );
 }

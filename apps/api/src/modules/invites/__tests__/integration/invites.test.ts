@@ -1,5 +1,6 @@
-import { describe, it, expect, afterEach, beforeEach } from 'bun:test';
-import { authedApi } from '#tests/helpers/app';
+import { describe, it, expect, afterAll, afterEach, beforeAll, beforeEach } from 'bun:test';
+import { db, notificationDelivery } from '@repo/db';
+import { authedApi, createProject } from '#tests/helpers/app';
 import { signUpTestUser, type TestUser } from '#tests/helpers/auth';
 import { resetDb } from '#tests/helpers/db';
 import { createRole } from '#tests/helpers/roles';
@@ -20,7 +21,7 @@ async function setupOwner(): Promise<{
 }> {
   const user = await signUpTestUser();
   const api = authedApi(user.cookie);
-  const project = await api.projects.post({ key: 'MKT', name: 'Marketing' });
+  const project = await createProject(api, { key: 'MKT', name: 'Marketing' });
   return { user, api, projectId: project.data!.id };
 }
 
@@ -33,7 +34,7 @@ async function configureEmail(owner: ReturnType<typeof authedApi>) {
   expect(result.status).toBe(200);
 }
 
-// The id of the team the caller owns — every account is given one at registration.
+// The id of the team the caller owns — signUpTestUser gives every account one.
 async function ownTeamId(api: ReturnType<typeof authedApi>): Promise<number> {
   const teams = await api.teams.get();
   return teams.data!.find((one) => one.role === 'owner')!.id;
@@ -160,7 +161,7 @@ describe('invites', () => {
       // Every project of a team shares its roles, so only a role of another team is
       // out of reach here.
       const stranger = authedApi((await signUpTestUser()).cookie);
-      await stranger.projects.post({ key: 'OPS', name: 'Operations' });
+      await createProject(stranger, { key: 'OPS', name: 'Operations' });
       const foreign = await createRole(stranger, 'OPS', { name: 'Ops', permissions: {} });
 
       const res = await owner.api
@@ -177,6 +178,123 @@ describe('invites', () => {
         .projects({ projectKey: 'MKT' })
         .invites.post({ email: 'x@example.com', role: 'member' });
       expect(res.status).toBe(403);
+    });
+  });
+
+  // A team invite names no project, so it cannot go through the notification outbox,
+  // which belongs to one: it only created a link to copy, and nobody was told.
+  describe('team invite email — POST /teams/:teamId/invites', () => {
+    let smtp: Bun.TCPSocketListener<{ data: boolean }>;
+    let received: { to: string[]; body: string }[] = [];
+
+    beforeAll(() => {
+      smtp = Bun.listen<{ data: boolean }>({
+        hostname: '127.0.0.1',
+        port: 0,
+        socket: {
+          open(socket) {
+            socket.data = { data: false };
+            received.push({ to: [], body: '' });
+            socket.write('220 fake ESMTP\r\n');
+          },
+          data(socket, chunk) {
+            const message = received[received.length - 1]!;
+            for (const line of chunk.toString().split('\r\n')) {
+              if (socket.data.data) {
+                if (line === '.') {
+                  socket.data.data = false;
+                  socket.write('250 queued\r\n');
+                } else message.body += line + '\n';
+                continue;
+              }
+              if (!line) continue;
+              const command = line.split(' ')[0]!.toUpperCase();
+              if (command === 'EHLO') socket.write('250 fake\r\n');
+              else if (command === 'RCPT') {
+                message.to.push(line);
+                socket.write('250 ok\r\n');
+              } else if (command === 'DATA') {
+                socket.data.data = true;
+                socket.write('354 go ahead\r\n');
+              } else if (command === 'QUIT') {
+                socket.write('221 bye\r\n');
+                socket.end();
+              } else socket.write('250 ok\r\n');
+            }
+          },
+        },
+      });
+    });
+
+    afterAll(() => smtp.stop(true));
+
+    beforeEach(() => {
+      received = [];
+    });
+
+    it('emails the invite link through the instance provider', async () => {
+      const owner = await setupOwner();
+      const configured = await owner.api.god['email-settings'].put({
+        from: 'Test <noreply@example.com>',
+        smtp: {
+          enabled: true,
+          host: '127.0.0.1',
+          port: smtp.port,
+          encryption: 'none',
+          username: '',
+          timeout: 5,
+        },
+        allowProjects: false,
+      });
+      expect(configured.status).toBe(200);
+      const teamId = await ownTeamId(owner.api);
+
+      const res = await owner.api
+        .teams({ teamId })
+        .invites.post({ email: 'newcomer@example.com', role: 'member' });
+
+      expect(res.status).toBe(201);
+      expect(res.data?.emailQueued).toBe(true);
+      const sent = received.find((m) => m.to.some((to) => to.includes('newcomer@example.com')));
+      // Quoted-printable breaks a long line with "=" at its end.
+      expect(sent?.body.replace(/=\r?\n/g, '')).toContain(`/invite/${res.data!.token}`);
+    });
+
+    it('writes a queued invite in the language of the address, or of its sender', async () => {
+      const { api } = await setupOwner();
+      await configureEmail(api);
+      await api.account.preferences.patch({ locale: 'ru' });
+      const known = await signUpTestUser();
+      await authedApi(known.cookie).account.preferences.patch({ locale: 'fr' });
+      const invites = api.projects({ projectKey: 'MKT' }).invites;
+
+      await invites.post({ email: 'newcomer@example.com', role: 'owner' });
+      await invites.post({ email: known.email, role: 'member' });
+
+      const queued = await db
+        .select({
+          recipient: notificationDelivery.recipient,
+          payload: notificationDelivery.payload,
+        })
+        .from(notificationDelivery);
+      const email = (to: string) => queued.find((row) => row.recipient === to)!.payload;
+      expect(email('newcomer@example.com').subject).toBe("Приглашение в Marketing в It's a Plan");
+      expect(email('newcomer@example.com').text).toContain('с ролью владелец');
+      expect(email('newcomer@example.com').html).toContain('class="button"');
+      expect(email(known.email).subject).toBe("Vous êtes invité à Marketing sur It's a Plan");
+    });
+
+    it('still creates the link when no email provider is configured', async () => {
+      const owner = await setupOwner();
+      const teamId = await ownTeamId(owner.api);
+
+      const res = await owner.api
+        .teams({ teamId })
+        .invites.post({ email: 'newcomer@example.com', role: 'member' });
+
+      expect(res.status).toBe(201);
+      expect(res.data?.emailQueued).toBe(false);
+      expect(res.data?.token.length).toBeGreaterThan(0);
     });
   });
 
@@ -269,7 +387,51 @@ describe('invites', () => {
 
       const res = await owner.api.projects({ projectKey: 'MKT' }).invites.get();
       expect(res.status).toBe(200);
-      expect(res.data?.map((i) => i.email)).toEqual(['b@example.com', 'a@example.com']);
+      expect(res.data?.map((i) => [i.email, i.token !== null])).toEqual([
+        ['b@example.com', true],
+        ['a@example.com', true],
+      ]);
+    });
+
+    it('hides the tokens from a member who may only read the invites', async () => {
+      const owner = await setupOwner();
+      const teamId = await ownTeamId(owner.api);
+      const reader = await addTeamMember(owner, teamId, 'member');
+      await owner.api
+        .projects({ projectKey: 'MKT' })
+        .members.post({ userId: reader.user.userId, role: 'member' });
+      await owner.api
+        .projects({ projectKey: 'MKT' })
+        .invites.post({ email: 'cfo@example.com', role: 'owner' });
+
+      const res = await reader.api.projects({ projectKey: 'MKT' }).invites.get();
+      expect(res.status).toBe(200);
+      expect(res.data).toMatchObject([{ email: 'cfo@example.com', token: null }]);
+    });
+
+    it('hides the token of an owner invite from a member who may not grant ownership', async () => {
+      const owner = await setupOwner();
+      const teamId = await ownTeamId(owner.api);
+      const inviter = await addTeamMember(owner, teamId, 'member');
+      const role = await createRole(owner.api, 'MKT', {
+        name: 'Recruiter',
+        permissions: { members_invite: { create: true, read: true } },
+      });
+      await owner.api
+        .projects({ projectKey: 'MKT' })
+        .members.post({ userId: inviter.user.userId, role: 'member', roleId: role.data!.id });
+      await owner.api
+        .projects({ projectKey: 'MKT' })
+        .invites.post({ email: 'a@example.com', role: 'member', roleId: role.data!.id });
+      await owner.api
+        .projects({ projectKey: 'MKT' })
+        .invites.post({ email: 'b@example.com', role: 'owner' });
+
+      const res = await inviter.api.projects({ projectKey: 'MKT' }).invites.get();
+      expect(res.data?.map((i) => [i.email, i.token !== null])).toEqual([
+        ['b@example.com', false],
+        ['a@example.com', true],
+      ]);
     });
 
     it('denies a non-member with 403', async () => {
@@ -406,15 +568,15 @@ describe('invites', () => {
       expect(view.data).toMatchObject({ status: 'accepted' });
     });
 
-    it('refuses the accept once the team has no seat left', async () => {
+    it('refuses the accept once the workspace has no seat left', async () => {
       const owner = await setupOwner();
-      const invitee = await signUpTestUser();
+      const invitee = await signUpTestUser({ team: false });
       const created = await owner.api
         .projects({ projectKey: 'MKT' })
         .invites.post({ email: invitee.email, role: 'member' });
       const inviteeApi = authedApi(invitee.cookie);
-      // The owner alone already fills the team.
-      setLimits({ maxTeamMembers: 1 });
+      // The owner alone already fills the workspace.
+      setLimits({ maxSeats: 1 });
 
       const accept = await inviteeApi.invites({ token: created.data!.token }).accept.post();
       expect(accept.status).toBe(409);
@@ -425,6 +587,20 @@ describe('invites', () => {
       expect((await inviteeApi.invites({ token: created.data!.token }).accept.post()).status).toBe(
         200,
       );
+    });
+
+    it('takes no new seat for somebody already in another team of the workspace', async () => {
+      const owner = await setupOwner();
+      const invitee = await signUpTestUser();
+      const created = await owner.api
+        .projects({ projectKey: 'MKT' })
+        .invites.post({ email: invitee.email, role: 'member' });
+      setLimits({ maxSeats: 2 });
+
+      const accept = await authedApi(invitee.cookie)
+        .invites({ token: created.data!.token })
+        .accept.post();
+      expect(accept.status).toBe(200);
     });
 
     it("joins the invitee on the invite's pinned custom role", async () => {
@@ -723,6 +899,25 @@ describe('invites', () => {
       ]);
     });
 
+    it('hides the token of a manager invite from a manager', async () => {
+      const owner = await setupOwner();
+      const teamId = await ownTeamId(owner.api);
+      const manager = await addTeamMember(owner, teamId, 'manager');
+      await owner.api
+        .teams({ teamId })
+        .invites.post({ email: 'boss@example.com', role: 'manager' });
+      await owner.api
+        .teams({ teamId })
+        .invites.post({ email: 'joiner@example.com', role: 'member' });
+
+      const res = await manager.api.teams({ teamId }).invites.get();
+      const pending = res.data?.filter((i) => i.status === 'pending');
+      expect(pending?.map((i) => [i.email, i.token !== null])).toEqual([
+        ['joiner@example.com', true],
+        ['boss@example.com', false],
+      ]);
+    });
+
     it('revokes an invite of the team', async () => {
       const owner = await setupOwner();
       const teamId = await ownTeamId(owner.api);
@@ -861,10 +1056,10 @@ describe('invites', () => {
         .invites.post({ email: 'x@example.com', role: 'owner' });
       expect(refused.status).toBe(403);
 
-      // The same caller may still invite a plain member.
+      // The same caller may still invite a plain member on a role within their own.
       const allowed = await inviter.api
         .projects({ projectKey: 'MKT' })
-        .invites.post({ email: 'x@example.com', role: 'member' });
+        .invites.post({ email: 'x@example.com', role: 'member', roleId: role.data!.id });
       expect(allowed.status).toBe(201);
     });
 

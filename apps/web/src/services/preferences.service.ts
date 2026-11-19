@@ -19,6 +19,8 @@ export const PREFERENCE_DEFAULTS: AccountPreferences = {
   timezone: 'UTC',
   locale: 'en',
   theme: 'system',
+  palette: 'default',
+  customTheme: null,
   issueOpenMode: 'panel',
   startPage: 'work-items',
   showChatByDefault: false,
@@ -26,6 +28,7 @@ export const PREFERENCE_DEFAULTS: AccountPreferences = {
   issueStatsView: 'compact',
   issueActivityView: 'flat',
   autoWatch: true,
+  onboardingSeen: false,
   lastProjectId: null,
   hotkeys: {},
 };

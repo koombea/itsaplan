@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Sparkles, Wrench } from 'lucide-react';
 import type { AiAgent } from '@/lib/api/endpoints/agents';
-import { teamSectionPath } from '@/utils/paths';
 import {
   useCreateAiAgent,
   useUpdateAiAgent,
@@ -12,7 +10,13 @@ import {
   useIntegrationModelsQuery,
   useIntegrationOptionsQuery,
 } from '@/services/integrations.service';
-import { useTeamProjectOptionsQuery, useTeamQuery } from '@/services/teams.service';
+import {
+  useTeam,
+  useTeamProjectDefaultsQuery,
+  useTeamProjectOptionsQuery,
+  useTeamQuery,
+  useUpdateTeamProjectDefaults,
+} from '@/services/teams.service';
 import {
   useSkillOptionsQuery,
   useAgentSkillsQuery,
@@ -24,9 +28,9 @@ import {
   useSetAgentTools,
 } from '@/services/customTools.service';
 import { Button } from '@/components/ui/button';
-import { useAgentSection } from '../../context/agentSection';
-import { AgentCapabilityList } from './AgentCapabilityList';
-import { AgentEmptyNotice } from './AgentEmptyNotice';
+import { useAgentCan, useAgentSection } from '../../context/agentSection';
+import { AgentSkillsPanel } from './AgentSkillsPanel';
+import { AgentToolsPanel } from './AgentToolsPanel';
 import TeamAiAgentFields, { AGENT_EXPANDED_WIDTH } from './TeamAiAgentFields';
 import {
   initialAgentValue,
@@ -36,24 +40,21 @@ import {
   toUpdatePatch,
   type AgentFormValue,
 } from '../../utils/agentForm';
-import { integrationLabel } from '@/utils/integrationLabels';
 import { useTranslations } from 'next-intl';
 
 // The Edit tab of the agent sheet, used for both create and edit. With no agent it
 // creates one; once created (onCreated lifts it to the sheet) the same form switches
 // to editing that agent without remounting, so the entered values stay. The kind can
 // be chosen on create but not changed after. A new external agent's key is revealed
-// once in the API key section. An internal agent's enabled skills are managed once
-// the agent exists (they are linked through a separate endpoint).
+// once in the API key section. An internal agent's skills are linked through a separate
+// endpoint, right after the agent is created or saved.
 export function AgentSheetForm({
   agent,
   expanded = false,
   onCreated,
 }: {
   agent: AiAgent | null;
-  // The project a new agent starts attached to, set when the sheet is opened from
-  // inside one. An agent reaches nothing until it works in a project, so creating it
-  // there means creating it for that project.
+  // The full-width layout: one column of sections, with the footer sized to match.
   expanded?: boolean;
   onCreated: (agent: AiAgent) => void;
 }) {
@@ -61,6 +62,9 @@ export function AgentSheetForm({
   const tCommon = useTranslations('common');
   const [value, setValue] = useState<AgentFormValue>(() => initialAgentValue(agent ?? undefined));
   const isCreate = agent == null;
+  // The sheet also opens for the test chat, to a viewer who may not change the agent.
+  const can = useAgentCan();
+  const canSave = isCreate || (can('edit') && agent.canManage);
   // The plaintext key issued in this sheet, by the create or by a regenerate. It is
   // shown once in the API key section and cannot be read back from the server.
   const [revealedKey, setRevealedKey] = useState<string | null>(null);
@@ -78,6 +82,11 @@ export function AgentSheetForm({
   const canManageTools = team?.permissions.agent_tools.edit ?? false;
 
   const projects = useTeamProjectOptionsQuery(teamId).data ?? [];
+  const teamRole = useTeam(teamId)?.role;
+  const canEditDefaults = teamRole != null && teamRole !== 'member';
+  const defaultIds = useTeamProjectDefaultsQuery(canEditDefaults ? teamId : null).data
+    ?.defaultAgentIds;
+  const updateDefaults = useUpdateTeamProjectDefaults(teamId);
   const toolsQuery = useAgentToolsQuery(teamId);
   const catalogQuery = useIntegrationCatalogQuery(teamId);
   const catalog = catalogQuery.data ?? [];
@@ -95,13 +104,8 @@ export function AgentSheetForm({
     teamId,
     agent && agent.kind === 'internal' && canManageSkills ? agent.id : null,
   );
-  const toolsLibraryQuery = useConfiguredToolOptionsQuery(
-    value.kind === 'internal' && canManageTools ? teamId : null,
-  );
-  const agentToolsQuery = useAgentToolLinksQuery(
-    teamId,
-    agent && agent.kind === 'internal' && canManageTools ? agent.id : null,
-  );
+  const toolsLibraryQuery = useConfiguredToolOptionsQuery(canManageTools ? teamId : null);
+  const agentToolsQuery = useAgentToolLinksQuery(teamId, agent && canManageTools ? agent.id : null);
 
   const createAgent = useCreateAiAgent(teamId);
   const updateAgent = useUpdateAiAgent(teamId);
@@ -111,7 +115,8 @@ export function AgentSheetForm({
     createAgent.isPending ||
     updateAgent.isPending ||
     setAgentSkills.isPending ||
-    setAgentTools.isPending;
+    setAgentTools.isPending ||
+    updateDefaults.isPending;
 
   // A new agent starts with every action granted. Seed the tool set once the action
   // catalog loads, only while creating and only if the user has not changed it yet.
@@ -142,6 +147,22 @@ export function AgentSheetForm({
   }, [agentToolsQuery.data, toolIds]);
   const selectedTools = toolIds ?? [];
 
+  // Whether the agent joins new projects, seeded from the team's defaults once they load.
+  const [joinsNewProjects, setJoinsNewProjects] = useState<boolean | null>(isCreate ? false : null);
+  useEffect(() => {
+    if (agent && defaultIds && joinsNewProjects === null) {
+      setJoinsNewProjects(defaultIds.includes(agent.id));
+    }
+  }, [agent, defaultIds, joinsNewProjects]);
+
+  async function saveJoinsNewProjects(agentId: number) {
+    if (!defaultIds || joinsNewProjects === null) return;
+    if (joinsNewProjects === defaultIds.includes(agentId)) return;
+    await updateDefaults.mutateAsync(
+      joinsNewProjects ? [...defaultIds, agentId] : defaultIds.filter((id) => id !== agentId),
+    );
+  }
+
   function merge(patch: Partial<AgentFormValue>) {
     setValue((prev) => {
       const next = { ...prev, ...patch };
@@ -153,17 +174,17 @@ export function AgentSheetForm({
     if ('username' in patch) setUsernameEdited((patch.username ?? '').trim() !== '');
   }
 
-  function toggleSkill(id: number, on: boolean) {
+  function toggleSkill(ids: number[], on: boolean) {
     setSkillIds((prev) => {
       const base = prev ?? [];
-      return on ? [...new Set([...base, id])] : base.filter((x) => x !== id);
+      return on ? [...new Set([...base, ...ids])] : base.filter((x) => !ids.includes(x));
     });
   }
 
-  function toggleTool(id: number, on: boolean) {
+  function toggleTool(ids: number[], on: boolean) {
     setToolIds((prev) => {
       const base = prev ?? [];
-      return on ? [...new Set([...base, id])] : base.filter((x) => x !== id);
+      return on ? [...new Set([...base, ...ids])] : base.filter((x) => !ids.includes(x));
     });
   }
 
@@ -176,9 +197,10 @@ export function AgentSheetForm({
       if (res.agent.kind === 'internal' && canManageSkills && skillIds && skillIds.length > 0) {
         await setAgentSkills.mutateAsync({ agentId: res.agent.id, skillIds });
       }
-      if (res.agent.kind === 'internal' && canManageTools && toolIds && toolIds.length > 0) {
+      if (canManageTools && toolIds && toolIds.length > 0) {
         await setAgentTools.mutateAsync({ agentId: res.agent.id, agentToolIds: toolIds });
       }
+      await saveJoinsNewProjects(res.agent.id);
       setRevealedKey(res.apiKey);
       onCreated(res.agent);
     } else {
@@ -186,74 +208,28 @@ export function AgentSheetForm({
       if (agent.kind === 'internal' && canManageSkills && skillIds !== null) {
         await setAgentSkills.mutateAsync({ agentId: agent.id, skillIds });
       }
-      if (agent.kind === 'internal' && canManageTools && toolIds !== null) {
+      if (canManageTools && toolIds !== null) {
         await setAgentTools.mutateAsync({ agentId: agent.id, agentToolIds: toolIds });
       }
+      await saveJoinsNewProjects(agent.id);
     }
   }
 
   const skillsLibrary = skillsLibraryQuery.data ?? [];
   const showSkills = value.kind === 'internal' && canManageSkills;
 
-  // The Skills section body (the fields layout wraps it in a section). The configured
-  // skill library the agent may load.
   const skillsContent = showSkills ? (
-    skillsLibrary.length === 0 ? (
-      <AgentEmptyNotice
-        icon={Sparkles}
-        title={t('noSkills')}
-        hint={t('noSkillsHint')}
-        href={teamSectionPath(teamId, 'agent-skills')}
-        linkLabel={t('goToSkills')}
-      />
-    ) : (
-      <AgentCapabilityList
-        searchPlaceholder={t('searchSkills')}
-        onToggle={toggleSkill}
-        items={skillsLibrary.map((skill) => ({
-          id: skill.id,
-          checked: selectedSkills.includes(skill.id),
-          title: skill.name,
-          subtitle: skill.description || t('noDescription'),
-          search: `${skill.name} ${skill.description ?? ''}`.toLowerCase(),
-        }))}
-      />
-    )
+    <AgentSkillsPanel teamId={teamId} selected={selectedSkills} onToggle={toggleSkill} />
   ) : null;
 
   const toolsLibrary = toolsLibraryQuery.data ?? [];
-  const showTools = value.kind === 'internal' && canManageTools;
-
-  // The Tools section body: the configured custom tools the agent may call.
-  const toolsContent = showTools ? (
-    toolsLibrary.length === 0 ? (
-      <AgentEmptyNotice
-        icon={Wrench}
-        title={t('noTools')}
-        hint={t('noToolsHint')}
-        href={teamSectionPath(teamId, 'agent-tools')}
-        linkLabel={t('goToTools')}
-      />
-    ) : (
-      <AgentCapabilityList
-        searchPlaceholder={t('searchTools')}
-        onToggle={toggleTool}
-        items={toolsLibrary.map((tool) => {
-          const toolLabel =
-            catalog.flatMap((i) => i.tools).find((t) => t.key === tool.toolKey)?.label ??
-            tool.toolKey;
-          const integration = integrationLabel(catalog, tool.integrationKey);
-          return {
-            id: tool.id,
-            checked: selectedTools.includes(tool.id),
-            title: toolLabel,
-            subtitle: tool.credentialLabel ?? undefined,
-            group: integration,
-            search: `${toolLabel} ${integration} ${tool.credentialLabel ?? ''}`.toLowerCase(),
-          };
-        })}
-      />
-    )
+  const toolsContent = canManageTools ? (
+    <AgentToolsPanel
+      teamId={teamId}
+      catalog={catalog}
+      selected={selectedTools}
+      onToggle={toggleTool}
+    />
   ) : null;
 
   // "enabled / available" over each capability library, shown in the section header
@@ -285,6 +261,8 @@ export function AgentSheetForm({
       toolsBadge={countBadge(selectedTools.length, toolsLibrary.length)}
       revealedKey={revealedKey}
       onRevealedKey={setRevealedKey}
+      joinsNewProjects={joinsNewProjects ?? false}
+      onJoinsNewProjectsChange={canEditDefaults ? setJoinsNewProjects : undefined}
     />
   );
 
@@ -293,7 +271,7 @@ export function AgentSheetForm({
       className="flex h-full min-h-0 flex-col"
       onSubmit={(e) => {
         e.preventDefault();
-        void submit();
+        if (canSave) void submit();
       }}
     >
       {expanded ? (
@@ -303,17 +281,19 @@ export function AgentSheetForm({
           <div className={`mx-auto w-full space-y-6 ${contentWidth}`}>{fields}</div>
         </div>
       )}
-      <div className="border-t border-border/60 px-4 py-3 sm:px-6">
-        <div className={`mx-auto flex w-full ${contentWidth} ${expanded ? 'justify-end' : ''}`}>
-          <Button
-            type="submit"
-            className={expanded ? 'min-w-40' : 'w-full'}
-            disabled={!isAgentFormValid(value) || saving}
-          >
-            {saving ? tCommon('saving') : isCreate ? t('create') : t('save')}
-          </Button>
+      {canSave && (
+        <div className="border-t border-border/60 px-4 py-3 sm:px-6">
+          <div className={`mx-auto flex w-full ${contentWidth} ${expanded ? 'justify-end' : ''}`}>
+            <Button
+              type="submit"
+              className={expanded ? 'min-w-40' : 'w-full'}
+              disabled={!isAgentFormValid(value) || saving}
+            >
+              {saving ? tCommon('saving') : isCreate ? t('create') : t('save')}
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
     </form>
   );
 }

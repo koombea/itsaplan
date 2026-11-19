@@ -1,5 +1,8 @@
-import { describe, it, expect, beforeEach } from 'bun:test';
-import { authedApi, type Api } from '#tests/helpers/app';
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { randomUUID } from 'node:crypto';
+import { db, notificationDelivery } from '@repo/db';
+import { asc, eq } from 'drizzle-orm';
+import { authedApi, type Api, createProject } from '#tests/helpers/app';
 import { signUpTestUser } from '#tests/helpers/auth';
 import { resetDb } from '#tests/helpers/db';
 
@@ -14,15 +17,16 @@ interface Member {
   username: string;
 }
 
-async function setup(): Promise<{ owner: Member; columnId: number; doneColumnId: number }> {
+async function setup() {
   const u = await signUpTestUser();
   const api = authedApi(u.cookie);
-  await api.projects.post({ key: 'MKT', name: 'Marketing' });
+  await createProject(api, { key: 'MKT', name: 'Marketing' });
   const view = await api.projects({ projectKey: 'MKT' }).get();
   const columns = view.data!.columns;
   const done = columns.find((c) => c.stateType === 'completed') ?? columns[columns.length - 1];
   return {
     owner: { api, userId: u.userId, username: u.username },
+    project: view.data!.project,
     columnId: columns[0].id,
     doneColumnId: done.id,
   };
@@ -43,6 +47,133 @@ function createIssue(client: Api, columnId: number, patch: Record<string, unknow
 }
 
 describe('notifications', () => {
+  it('bulk read and delete keep notifications outside the active type filter', async () => {
+    const { owner, columnId, doneColumnId } = await setup();
+    const member = await addMember(owner);
+    const issue = (await createIssue(owner.api, columnId, { assigneeUserId: member.userId })).data!;
+    const client = owner.api.issues({ issueId: issue.id });
+    await client.comments.post({ body: 'Please review' } as never);
+    await client.patch({ description: `@${member.username} review this` });
+    await client.patch({ columnId: doneColumnId });
+
+    const before = (await member.api.notifications.get({ query: {} })).data!.items;
+    expect(before.map((item) => item.type).sort()).toEqual([
+      'assigned',
+      'commented',
+      'mentioned',
+      'state_changed',
+    ]);
+    const read = await member.api.notifications['read-all'].post({
+      types: ['state_changed'],
+      includeSnoozed: false,
+    });
+    expect(read.status).toBe(200);
+    expect(read.data!.count).toBe(1);
+    const afterRead = (await member.api.notifications.get({ query: {} })).data!.items;
+    expect(afterRead.filter((item) => item.readAt != null).map((item) => item.type)).toEqual([
+      'state_changed',
+    ]);
+    expect((await member.api.notifications['read-all'].post()).data!.count).toBe(3);
+    const deleted = await member.api.notifications.delete(undefined, {
+      query: { scope: 'read-completed', types: 'state_changed', includeSnoozed: 'false' },
+    });
+    expect(deleted.data!.count).toBe(1);
+    const remaining = (await member.api.notifications.get({ query: {} })).data!.items;
+    expect(remaining.map((item) => item.type).sort()).toEqual([
+      'assigned',
+      'commented',
+      'mentioned',
+    ]);
+    expect(remaining.every((item) => item.readAt != null)).toBe(true);
+  });
+
+  it('completed deletes unread and read notifications, and leaves active issues alone', async () => {
+    const { owner, columnId, doneColumnId } = await setup();
+    const member = await addMember(owner);
+    const active = (await createIssue(owner.api, columnId, { assigneeUserId: member.userId }))
+      .data!;
+    const completed = (
+      await createIssue(owner.api, doneColumnId, { assigneeUserId: member.userId })
+    ).data!;
+    await owner.api.issues({ issueId: completed.id }).comments.post({ body: 'Done' } as never);
+
+    const before = (await member.api.notifications.get({ query: {} })).data!.items;
+    expect(before).toHaveLength(3);
+    expect(
+      before
+        .filter((item) => item.issueId === completed.id)
+        .map((item) => item.type)
+        .sort(),
+    ).toEqual(['assigned', 'commented']);
+    expect(before.find((item) => item.issueId === active.id)!.type).toBe('assigned');
+    expect(before.every((item) => item.readAt == null)).toBe(true);
+    await member.api.notifications['read-all'].post({ types: ['commented'] });
+
+    const assigned = await member.api.notifications.delete(undefined, {
+      query: {
+        scope: 'completed',
+        types: 'assigned',
+        includeRead: 'false',
+        includeSnoozed: 'false',
+      },
+    });
+    expect(assigned.data!.count).toBe(1);
+    const afterAssigned = (await member.api.notifications.get({ query: {} })).data!.items;
+    expect(afterAssigned.map((item) => item.issueId!).sort((a, b) => a - b)).toEqual(
+      [active.id, completed.id].sort((a, b) => a - b),
+    );
+    expect(afterAssigned.find((item) => item.issueId === completed.id)!.readAt).not.toBeNull();
+    expect(afterAssigned.find((item) => item.issueId === active.id)!.readAt).toBeNull();
+
+    const all = await member.api.notifications.delete(undefined, {
+      query: { scope: 'completed', includeRead: 'false', includeSnoozed: 'false' },
+    });
+    expect(all.data!.count).toBe(1);
+    const remaining = (await member.api.notifications.get({ query: {} })).data!.items;
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].issueId).toBe(active.id);
+    expect(remaining[0].readAt).toBeNull();
+  });
+
+  it('bulk actions respect actor and snooze filters', async () => {
+    const { owner, columnId } = await setup();
+    const member = await addMember(owner);
+    const other = await addMember(owner);
+    const issue = (await createIssue(owner.api, columnId, { assigneeUserId: member.userId })).data!;
+    await other.api.issues({ issueId: issue.id }).comments.post({ body: 'Other actor' } as never);
+    await owner.api.issues({ issueId: issue.id }).comments.post({ body: 'Owner actor' } as never);
+    const items = (await member.api.notifications.get({ query: {} })).data!.items;
+    const snoozed = items.find((item) => item.type === 'assigned')!;
+    await member.api.notifications({ id: snoozed.id }).snooze.post({
+      until: new Date(Date.now() + 86_400_000).toISOString(),
+    });
+    const read = await member.api.notifications['read-all'].post({
+      from: owner.userId,
+      includeSnoozed: false,
+    });
+    expect(read.data!.count).toBe(1);
+    const deleted = await member.api.notifications.delete(undefined, {
+      query: { scope: 'all', from: owner.userId, includeSnoozed: 'false' },
+    });
+    expect(deleted.data!.count).toBe(1);
+    const remaining = (await member.api.notifications.get({ query: { includeSnoozed: 'true' } }))
+      .data!.items;
+    expect(remaining).toHaveLength(2);
+    expect(remaining.every((item) => item.readAt == null)).toBe(true);
+    expect(remaining.some((item) => item.id === snoozed.id)).toBe(true);
+  });
+
+  it('rejects an unknown bulk delete type without deleting notifications', async () => {
+    const { owner, columnId } = await setup();
+    const member = await addMember(owner);
+    await createIssue(owner.api, columnId, { assigneeUserId: member.userId });
+    const deleted = await member.api.notifications.delete(undefined, {
+      query: { scope: 'all', types: 'unknown' },
+    });
+    expect(deleted.status).toBe(400);
+    expect((await member.api.notifications.get({ query: {} })).data!.items).toHaveLength(1);
+  });
+
   beforeEach(async () => {
     await resetDb();
   });
@@ -58,7 +189,11 @@ describe('notifications', () => {
 
     const inbox = await member.api.notifications.get({ query: { types: 'mentioned' } });
     expect(inbox.data!.items).toHaveLength(1);
-    expect(inbox.data!.items[0]).toMatchObject({ type: 'mentioned', actorUserId: owner.userId });
+    expect(inbox.data!.items[0]).toMatchObject({
+      type: 'mentioned',
+      actorUserId: owner.userId,
+      issueCommentId: null,
+    });
   });
 
   it('notifies a member mentioned in a markdown custom field', async () => {
@@ -153,14 +288,123 @@ describe('notifications', () => {
 
     // Member comments -> owner (a watcher) gets a 'commented' notification.
     await owner.api.issues({ issueId }).comments.post({ body: 'looking into it' } as never);
-    await member.api.issues({ issueId }).comments.post({ body: 'done' } as never);
+    const comment = (await member.api.issues({ issueId }).comments.post({ body: 'done' })).data!;
 
     const ownerInbox = await owner.api.notifications.get({ query: { types: 'commented' } });
     expect(ownerInbox.data!.items).toHaveLength(1);
     expect(ownerInbox.data!.items[0]).toMatchObject({
       type: 'commented',
       actorUserId: member.userId,
+      issueCommentId: comment.id,
     });
+  });
+
+  it('keeps the notification of a deleted comment, pointing at the issue only', async () => {
+    const { owner, columnId } = await setup();
+    const member = await addMember(owner);
+    const issue = (await createIssue(owner.api, columnId)).data!;
+    const comment = (
+      await owner.api
+        .issues({ issueId: issue.id })
+        .comments.post({ body: `@${member.username} look` })
+    ).data!;
+
+    await owner.api.comments({ commentId: comment.id }).delete();
+
+    const inbox = await member.api.notifications.get({ query: {} });
+    expect(inbox.data!.items).toHaveLength(1);
+    expect(inbox.data!.items[0]).toMatchObject({
+      type: 'mentioned',
+      issueId: issue.id,
+      issueCommentId: null,
+    });
+  });
+
+  it('links the email about a comment to the comment, and about a description to the issue', async () => {
+    const { owner, project, columnId } = await setup();
+    const member = await addMember(owner);
+    await owner.api.teams({ teamId: project.teamId })['notification-settings'].put({
+      smtp: {
+        enabled: true,
+        host: 'smtp.example.com',
+        port: 587,
+        encryption: 'none',
+        username: 'mailer@example.com',
+        password: 'secret',
+        timeout: null,
+      },
+    });
+    const events = { assigned: true, mentioned: true, commented: true, state_changed: true };
+    await member.api.projects({ projectKey: 'MKT' })['notification-preferences'].put({
+      emailEvents: events,
+      telegramEvents: events,
+    });
+    const issue = (await createIssue(owner.api, columnId)).data!;
+    const client = owner.api.issues({ issueId: issue.id });
+    const comment = (await client.comments.post({ body: `@${member.username} have a look` })).data!;
+    await client.patch({ description: `@${member.username} size this` });
+
+    // No route reads the outbox, and its rows are what the worker sends.
+    const queued = await db
+      .select({ payload: notificationDelivery.payload })
+      .from(notificationDelivery)
+      .orderBy(asc(notificationDelivery.id));
+    const issueLink = `${process.env.APP_URL}/${project.teamRef}/issue/${issue.identifier}`;
+    expect(queued.map((row) => row.payload.url)).toEqual([
+      `${issueLink}#comment-${comment.id}`,
+      issueLink,
+    ]);
+  });
+
+  it('sends each recipient the email in their language, with what god changed', async () => {
+    const { owner, project, columnId, doneColumnId } = await setup();
+    const member = await addMember(owner);
+    await owner.api.teams({ teamId: project.teamId })['notification-settings'].put({
+      smtp: {
+        enabled: true,
+        host: 'smtp.example.com',
+        port: 587,
+        encryption: 'none',
+        username: 'mailer@example.com',
+        password: 'secret',
+        timeout: null,
+      },
+    });
+    const events = { assigned: true, mentioned: true, commented: true, state_changed: true };
+    await member.api.projects({ projectKey: 'MKT' })['notification-preferences'].put({
+      emailEvents: events,
+      telegramEvents: events,
+    });
+    await member.api.account.preferences.patch({ locale: 'ru' });
+    await owner.api.god['email-templates'].put({
+      edits: {
+        stateChanged: {
+          ru: {
+            subject: 'Статус {ref}: {to}',
+            body: '**{title}** {from} → {to}',
+            button: 'Открыть',
+          },
+        },
+      },
+      layout: null,
+    });
+    const issue = (
+      await createIssue(owner.api, columnId, {
+        title: '<b>Loud</b> title',
+        assigneeUserId: member.userId,
+      })
+    ).data!;
+    await db.delete(notificationDelivery);
+
+    await owner.api.issues({ issueId: issue.id }).patch({ columnId: doneColumnId });
+
+    const [queued] = await db
+      .select({ payload: notificationDelivery.payload })
+      .from(notificationDelivery);
+    expect(queued!.payload.subject).toStartWith(`Статус ${issue.identifier}:`);
+    expect(queued!.payload.text).toContain('<b>Loud</b> title');
+    expect(queued!.payload.html).toContain('&lt;b&gt;Loud&lt;/b&gt; title');
+    expect(queued!.payload.html).toContain('class="button"');
   });
 
   it('a status change notification names the states it moved between', async () => {
@@ -223,5 +467,143 @@ describe('notifications', () => {
     // The owner does not own this notification: mutating it is a 404.
     const res = await owner.api.notifications({ id }).read.post({ read: true } as never);
     expect(res.status).toBe(404);
+  });
+});
+
+// Push is the instance's, not the team's: it is on while the WEB_PUSH_* variables are
+// set, and each member chooses its events per project like email and Telegram.
+describe('push notifications', () => {
+  const ENV = ['WEB_PUSH_VAPID_PUBLIC_KEY', 'WEB_PUSH_VAPID_PRIVATE_KEY', 'WEB_PUSH_SUBJECT'];
+  const none = {
+    assigned: false,
+    mentioned: false,
+    commented: false,
+    state_changed: false,
+    reacted: false,
+  };
+  let saved: (string | undefined)[];
+
+  beforeEach(async () => {
+    saved = ENV.map((name) => process.env[name]);
+    await resetDb();
+    process.env.WEB_PUSH_VAPID_PUBLIC_KEY =
+      'BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8';
+    process.env.WEB_PUSH_VAPID_PRIVATE_KEY = 'yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw';
+    process.env.WEB_PUSH_SUBJECT = 'mailto:ops@example.com';
+  });
+
+  afterEach(() => {
+    ENV.forEach((name, i) => {
+      if (saved[i] === undefined) delete process.env[name];
+      else process.env[name] = saved[i];
+    });
+  });
+
+  async function subscribeBrowser(member: Member): Promise<number> {
+    const pair = (await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, [
+      'deriveBits',
+    ])) as CryptoKeyPair;
+    const res = await member.api.push.subscriptions.post({
+      endpoint: `https://example.com/push/${randomUUID()}`,
+      keys: {
+        p256dh: Buffer.from(await crypto.subtle.exportKey('raw', pair.publicKey)).toString(
+          'base64url',
+        ),
+        auth: Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString('base64url'),
+      },
+    });
+    return res.data!.id;
+  }
+
+  function queuedPushes() {
+    return db
+      .select({ recipient: notificationDelivery.recipient, payload: notificationDelivery.payload })
+      .from(notificationDelivery)
+      .where(eq(notificationDelivery.channel, 'push'))
+      .orderBy(asc(notificationDelivery.id));
+  }
+
+  it('queues one push per browser for the events the member turned on', async () => {
+    const { owner, project, columnId } = await setup();
+    const member = await addMember(owner);
+    const browsers = [await subscribeBrowser(member), await subscribeBrowser(member)];
+    await member.api.projects({ projectKey: 'MKT' })['notification-preferences'].put({
+      emailEvents: none,
+      telegramEvents: none,
+      pushEvents: { ...none, assigned: true },
+    });
+
+    const issue = (await createIssue(owner.api, columnId, { assigneeUserId: member.userId })).data!;
+    await owner.api.issues({ issueId: issue.id }).comments.post({ body: 'Started on it' });
+
+    const inbox = (await member.api.notifications.get({ query: {} })).data!.items;
+    expect(inbox.map((n) => n.type).sort()).toEqual(['assigned', 'commented']);
+    const assigned = inbox.find((n) => n.type === 'assigned');
+    const queued = await queuedPushes();
+    expect(queued.map((row) => Number(row.recipient)).sort()).toEqual(browsers.sort());
+    for (const row of queued) {
+      expect(row.payload).toEqual({
+        title: `${issue.identifier} Task`,
+        text: `Assigned by ${assigned!.actorName}`,
+        url: `${process.env.APP_URL}/${project.teamRef}/issue/${issue.identifier}`,
+        tag: `inbox-${assigned!.id}`,
+      });
+    }
+  });
+
+  it('queues no push for a browser that subscribed with keys the instance no longer has', async () => {
+    const { owner, columnId } = await setup();
+    const member = await addMember(owner);
+    await subscribeBrowser(member);
+    await member.api.projects({ projectKey: 'MKT' })['notification-preferences'].put({
+      emailEvents: none,
+      telegramEvents: none,
+      pushEvents: { ...none, assigned: true },
+    });
+    // A new key pair: the push services refuse this instance's token for the browser above.
+    process.env.WEB_PUSH_VAPID_PUBLIC_KEY =
+      'BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4';
+    process.env.WEB_PUSH_VAPID_PRIVATE_KEY = 'q1dXpw3UpT5VOmu_cf_v6ih07Aems3njxI-JWgLcM94';
+    const current = await subscribeBrowser(member);
+
+    await createIssue(owner.api, columnId, { assigneeUserId: member.userId });
+
+    expect((await queuedPushes()).map((row) => Number(row.recipient))).toEqual([current]);
+  });
+
+  it('queues no push while push is off', async () => {
+    const { owner, columnId } = await setup();
+    const member = await addMember(owner);
+    await subscribeBrowser(member);
+    const all = { assigned: true, mentioned: true, commented: true, state_changed: true };
+    await member.api.projects({ projectKey: 'MKT' })['notification-preferences'].put({
+      emailEvents: none,
+      telegramEvents: none,
+      pushEvents: all,
+    });
+    delete process.env.WEB_PUSH_SUBJECT;
+
+    await createIssue(owner.api, columnId, { assigneeUserId: member.userId });
+
+    expect(await queuedPushes()).toEqual([]);
+  });
+
+  it('keeps the stored push events when a write leaves them out', async () => {
+    const { owner } = await setup();
+    const member = await addMember(owner);
+    const prefs = member.api.projects({ projectKey: 'MKT' })['notification-preferences'];
+    await prefs.put({
+      emailEvents: none,
+      telegramEvents: none,
+      pushEvents: { ...none, mentioned: true },
+    });
+
+    const res = await prefs.put({ emailEvents: { ...none, assigned: true }, telegramEvents: none });
+
+    expect(res.data).toEqual({
+      emailEvents: { ...none, assigned: true },
+      telegramEvents: none,
+      pushEvents: { ...none, mentioned: true },
+    });
   });
 });

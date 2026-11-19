@@ -1,5 +1,5 @@
 import { Elysia, t } from 'elysia';
-import { mcpTool } from '#mcp/generate';
+import { mcpImageTool, mcpTool } from '#mcp/generate';
 import { noContent } from '#shared/http';
 import { guards, entityGuard } from '#shared/guards';
 import { authContext } from '#shared/auth-context';
@@ -14,6 +14,7 @@ import {
   publicIdParams,
   rawAttachmentQuery,
   uploadAttachmentBody,
+  ViewAttachmentsResponse,
 } from '#modules/attachments/model';
 import {
   assertAttachmentUploadAllowed,
@@ -22,6 +23,8 @@ import {
   deleteAttachmentObject,
   safeAttachmentFilename,
   storeAttachmentObject,
+  viewAttachments,
+  VIEWABLE_IMAGES,
 } from '#modules/attachments/storage';
 import {
   FeedPageResponse,
@@ -121,7 +124,7 @@ export const initiativeRoutes = new Elysia({
       response: { 200: InitiativePageResponse, ...commonErrors },
       detail: {
         summary: 'List initiatives',
-        description: "List a project's initiatives, filtered, sorted and paged.",
+        description: "List a project's initiatives.",
         ...mcpTool('list_initiatives'),
       },
     },
@@ -190,7 +193,7 @@ export const initiativeRoutes = new Elysia({
       response: { 200: InitiativeResponse, ...commonErrors },
       detail: {
         summary: 'Get an initiative',
-        description: 'Get an initiative by its numeric id.',
+        description: 'Get an initiative by id.',
         ...mcpTool('get_initiative'),
       },
     },
@@ -211,8 +214,7 @@ export const initiativeRoutes = new Elysia({
       response: { 200: InitiativeResponse, ...commonErrors },
       detail: {
         summary: 'Update an initiative',
-        description:
-          "Update an initiative by its numeric id. labelIds replaces the initiative's labels.",
+        description: 'Update an initiative. labelIds replaces its labels.',
         ...mcpTool('update_initiative'),
       },
     },
@@ -234,7 +236,7 @@ export const initiativeRoutes = new Elysia({
       response: { 204: t.Void(), ...commonErrors },
       detail: {
         summary: 'Delete an initiative',
-        description: 'Delete an initiative by its numeric id. Irreversible.',
+        description: 'Permanently delete an initiative.',
         ...mcpTool('delete_initiative'),
       },
     },
@@ -261,7 +263,7 @@ export const initiativeRoutes = new Elysia({
       response: { 200: FeedPageResponse, ...commonErrors },
       detail: {
         summary: 'Get an initiative feed',
-        description: "Get an initiative's activity feed by its numeric id.",
+        description: "Get an initiative's activity feed.",
         ...mcpTool('list_initiative_activity'),
       },
     },
@@ -276,7 +278,26 @@ export const initiativeRoutes = new Elysia({
       response: { 200: AttachmentListResponse, ...commonErrors },
       detail: {
         summary: 'List initiative attachments',
-        description: "List an initiative's attachments by its numeric id.",
+        description: "List an initiative's attachments.",
+        ...mcpTool('list_initiative_attachments'),
+      },
+    },
+  )
+
+  .get(
+    '/initiatives/:initiativeId/images',
+    async ({ params }) =>
+      viewAttachments(await listInitiativeAttachments(params.initiativeId), attachmentDto),
+    {
+      params: initiativeParams,
+      initiative: 'read',
+      response: { 200: ViewAttachmentsResponse, ...commonErrors },
+      detail: {
+        summary: 'View the images of an initiative',
+        description:
+          `Show the images attached to an initiative: ${VIEWABLE_IMAGES}. ` +
+          'Other attachments are returned in `others` with their url.',
+        ...mcpImageTool('view_initiative_images'),
       },
     },
   )

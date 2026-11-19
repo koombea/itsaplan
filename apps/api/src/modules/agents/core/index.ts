@@ -2,14 +2,17 @@ import { Elysia, t } from 'elysia';
 import { noContent, sseFrame, sseResponse } from '#shared/http';
 import { guards } from '#shared/guards';
 import { authContext } from '#shared/auth-context';
-import { requireUser, type TeamMembership } from '#shared/access';
+import { projectsWithPermission, requireUser, type TeamMembership } from '#shared/access';
 import { HttpError } from '#shared/lib';
 import { accessErrors, commonErrors, errors } from '#shared/responses';
 import { mcpTool } from '#mcp/generate';
 import { teamParams } from '#modules/teams/model';
+import { workspaceParams } from '#modules/workspaces/model';
 import { runsTeam } from '#modules/teams/service';
+import { paginate } from '#shared/pagination';
 import {
   listAgents,
+  listProjectAgents,
   createAgent,
   updateAgent,
   deleteAgent,
@@ -18,20 +21,31 @@ import {
   getAgentInProject,
   agentScopeOf,
   memberProjectIds,
+  assertFullAgentAccess,
+  withCanManage,
+  queueApiRun,
   type AgentKind,
 } from './service';
 import {
+  AgentAnalyticsResponse,
+  TeamAgentAnalyticsResponse,
   AgentRunPageResponse,
+  AgentTraceDetailResponse,
+  AgentTracePageResponse,
   AiAgentListResponse,
+  ProjectAgentListResponse,
   AiAgentResponse,
   ChatMessagesResponse,
   ChatThreadListResponse,
   CreateAgentResponse,
   renameThreadBody,
   RegenerateKeyResponse,
-  RunAgentResponse,
+  QueuedApiRunResponse,
   agentListQuery,
+  apiRunBody,
   agentParams,
+  analyticsQuery,
+  workspaceAnalyticsQuery,
   createAgentBody,
   projectAgentParams,
   runBody,
@@ -40,13 +54,24 @@ import {
   threadListQuery,
   threadPageQuery,
   threadParams,
+  traceParams,
+  tracesQuery,
   updateAgentBody,
 } from './model';
-import { runAgent, streamAgent, type AgentRunEvent, type RunOpts } from './runtime';
+import { streamAgent, type AgentRunEvent, type RunOpts } from './runtime';
+import { QUEUED_POLL_SECONDS } from './run-queue';
 import { peoplePreamble } from './prompt/run-context';
 import { attachmentPreamble, chartPreamble } from './prompt/framing';
 import type { SessionUser } from '#shared/auth-context';
 import { listAgentRuns } from './run-queue';
+import { getAgentTrace, listAgentTraces } from './runtime/traces';
+import {
+  analyticsProjects,
+  getAgentAnalytics,
+  onlyProjects,
+  queryProjectIds,
+  workspaceScope,
+} from './runtime/analytics';
 import {
   listChatThreads,
   getChatThreadMessages,
@@ -113,6 +138,25 @@ function threadStore(kind: AgentKind) {
       };
 }
 
+const DEFAULT_ANALYTICS_DAYS = 30;
+
+// Whether the caller may read the traces of that project: an owner or a manager of the
+// team reads every project the agent works in, anyone else only a project they belong to
+// themselves. The list names the project in the query and one trace carries it in its own
+// metadata, so a trace that names none is refused to everyone else.
+async function assertTraceScope(
+  membership: TeamMembership,
+  projectId: number | null,
+): Promise<void> {
+  if (runsTeam(membership.role)) return;
+  const mine =
+    projectId != null &&
+    (await memberProjectIds(membership.teamId, membership.userId)).includes(projectId);
+  if (!mine) {
+    throw new HttpError(403, 'You can only read the traces of a project you are a member of');
+  }
+}
+
 // The agent a :agentId path addresses, scoped by agentScopeOf — one of another team, and
 // one of a project the caller is not in, both read as missing.
 async function requireVisibleAgent(agentId: number, membership: TeamMembership) {
@@ -159,8 +203,11 @@ export const aiAgentRoutes = new Elysia({ name: 'ai-agents', detail: { tags: ['A
   .use(guards)
   .get(
     '/teams/:teamId/ai-agents',
-    ({ membership, query }) =>
-      listAgents(membership.teamId, query.projectId, agentScopeOf(membership)),
+    async ({ membership, query }) =>
+      withCanManage(
+        membership,
+        await listAgents(membership.teamId, query.projectId, agentScopeOf(membership)),
+      ),
     {
       params: teamParams,
       query: agentListQuery,
@@ -168,9 +215,7 @@ export const aiAgentRoutes = new Elysia({ name: 'ai-agents', detail: { tags: ['A
       response: { 200: AiAgentListResponse, ...accessErrors },
       detail: {
         summary: 'List AI agents',
-        description:
-          "List the team's AI agents with their config. Pass projectId to list only the agents " +
-          'working in that project.',
+        description: "List the team's AI agents with their config.",
         ...mcpTool('list_ai_agents'),
       },
     },
@@ -178,7 +223,12 @@ export const aiAgentRoutes = new Elysia({ name: 'ai-agents', detail: { tags: ['A
 
   .get(
     '/teams/:teamId/ai-agents/:agentId',
-    ({ params, membership }) => requireVisibleAgent(params.agentId, membership),
+    async ({ params, membership }) => {
+      const [agent] = await withCanManage(membership, [
+        await requireVisibleAgent(params.agentId, membership),
+      ]);
+      return agent;
+    },
     {
       params: agentParams,
       teamPermission: ['ai_agents', 'read'],
@@ -199,11 +249,13 @@ export const aiAgentRoutes = new Elysia({ name: 'ai-agents', detail: { tags: ['A
     async ({ membership, body, set, user }) => {
       const projectIds = await resolveAgentProjects(membership, body.projectIds, []);
       set.status = 201;
-      return createAgent(membership.teamId, {
+      const created = await createAgent(membership.teamId, {
         ...body,
         projectIds,
         ownerUserId: requireUser(user).id,
       });
+      const [agent] = await withCanManage(membership, [created.agent]);
+      return { ...created, agent };
     },
     {
       params: teamParams,
@@ -212,9 +264,7 @@ export const aiAgentRoutes = new Elysia({ name: 'ai-agents', detail: { tags: ['A
       response: { 201: CreateAgentResponse, ...commonErrors, ...errors(409) },
       detail: {
         summary: 'Create an AI agent',
-        description:
-          "Create an AI agent. kind 'external' returns an API key once; kind 'internal' runs " +
-          'in-process from a model config and has no key.',
+        description: "Create an AI agent. For kind 'external', the API key is returned only once.",
         ...mcpTool('create_ai_agent'),
       },
     },
@@ -222,17 +272,14 @@ export const aiAgentRoutes = new Elysia({ name: 'ai-agents', detail: { tags: ['A
 
   .patch(
     '/teams/:teamId/ai-agents/:agentId',
-    async ({ params, membership, body, user }) => {
+    async ({ params, membership, body }) => {
       const current = await requireVisibleAgent(params.agentId, membership);
+      await assertFullAgentAccess(membership, params.agentId);
       const projectIds = await resolveAgentProjects(membership, body.projectIds, current.projects);
-      const agent = await updateAgent(
-        params.agentId,
-        membership.teamId,
-        { ...body, projectIds },
-        requireUser(user).id,
-      );
+      const agent = await updateAgent(params.agentId, membership.teamId, { ...body, projectIds });
       if (!agent) throw new HttpError(404, 'Agent not found');
-      return agent;
+      const [withAccess] = await withCanManage(membership, [agent]);
+      return withAccess;
     },
     {
       body: updateAgentBody,
@@ -241,7 +288,7 @@ export const aiAgentRoutes = new Elysia({ name: 'ai-agents', detail: { tags: ['A
       response: { 200: AiAgentResponse, ...commonErrors, ...errors(409) },
       detail: {
         summary: 'Update an AI agent',
-        description: "Update an AI agent's name, username, projects, or model config.",
+        description: "Update an AI agent's name, username, projects or model config.",
         ...mcpTool('update_ai_agent'),
       },
     },
@@ -251,17 +298,13 @@ export const aiAgentRoutes = new Elysia({ name: 'ai-agents', detail: { tags: ['A
   // a project, so this is both the attach and the detach: the set is replaced.
   .put(
     '/teams/:teamId/ai-agents/:agentId/projects',
-    async ({ params, membership, body, user }) => {
+    async ({ params, membership, body }) => {
       const current = await requireVisibleAgent(params.agentId, membership);
       const projectIds = await resolveAgentProjects(membership, body.projectIds, current.projects);
-      const agent = await updateAgent(
-        params.agentId,
-        membership.teamId,
-        { projectIds },
-        requireUser(user).id,
-      );
+      const agent = await updateAgent(params.agentId, membership.teamId, { projectIds });
       if (!agent) throw new HttpError(404, 'Agent not found');
-      return agent;
+      const [withAccess] = await withCanManage(membership, [agent]);
+      return withAccess;
     },
     {
       body: setAgentProjectsBody,
@@ -271,9 +314,8 @@ export const aiAgentRoutes = new Elysia({ name: 'ai-agents', detail: { tags: ['A
       detail: {
         summary: "Set an AI agent's projects",
         description:
-          'Replace the projects of the team the agent works in. Send the full set: a project ' +
-          'left out is detached. A project of another team is rejected, and so is one the ' +
-          'caller is not a member of unless they run the team.',
+          'Set the team projects an agent works in. A project of another team is refused. A ' +
+          'project you are not a member of is refused, unless you are a team owner or manager.',
         ...mcpTool('set_ai_agent_projects'),
       },
     },
@@ -285,6 +327,7 @@ export const aiAgentRoutes = new Elysia({ name: 'ai-agents', detail: { tags: ['A
     '/teams/:teamId/ai-agents/:agentId/regenerate-key',
     async ({ params, membership }) => {
       const agent = await requireVisibleAgent(params.agentId, membership);
+      await assertFullAgentAccess(membership, params.agentId);
       if (agent.kind !== 'external')
         throw new HttpError(400, 'Internal agents do not use an API key');
       const apiKey = await regenerateKey(params.agentId, membership.teamId);
@@ -297,7 +340,7 @@ export const aiAgentRoutes = new Elysia({ name: 'ai-agents', detail: { tags: ['A
       response: { 200: RegenerateKeyResponse, ...commonErrors },
       detail: {
         summary: 'Regenerate the API key',
-        description: "Rotate an external agent's API key and return the new secret once.",
+        description: "Rotate an external agent's API key. Returns the new key only once.",
         // Rotating invalidates the previous key, which cannot be recovered.
         ...mcpTool('regenerate_ai_agent_key', { destructiveHint: true }),
       },
@@ -335,10 +378,116 @@ export const aiAgentRoutes = new Elysia({ name: 'ai-agents', detail: { tags: ['A
     },
   )
 
+  // The traces of the agent's runs: what the model and the tools were called with at
+  // every step, recorded by the runtime. A run of the queue carries its runId, so the
+  // run history and its trace name each other.
+  .get(
+    '/teams/:teamId/ai-agents/:agentId/traces',
+    async ({ params, membership, query }) => {
+      await requireVisibleAgent(params.agentId, membership);
+      await assertTraceScope(membership, query.projectId ?? null);
+      return paginate(query, (window) =>
+        listAgentTraces(params.agentId, membership.userId, {
+          ...window,
+          projectId: query.projectId,
+        }),
+      );
+    },
+    {
+      params: agentParams,
+      query: tracesQuery,
+      teamPermission: ['ai_agents', 'read'],
+      response: { 200: AgentTracePageResponse, ...commonErrors },
+      detail: {
+        summary: 'List agent traces',
+        description:
+          "One page of the traces of an agent's runs, newest first. An owner or a manager of " +
+          'the team reads them all; anyone else names a project they belong to. A chat ' +
+          'run is read only by the member who chatted.',
+      },
+    },
+  )
+
+  .get(
+    '/teams/:teamId/ai-agents/:agentId/traces/:traceId',
+    async ({ params, membership }) => {
+      await requireVisibleAgent(params.agentId, membership);
+      const trace = await getAgentTrace(params.agentId, params.traceId, membership.userId);
+      if (!trace) throw new HttpError(404, 'Trace not found');
+      await assertTraceScope(membership, trace.trace.projectId);
+      return trace;
+    },
+    {
+      params: traceParams,
+      teamPermission: ['ai_agents', 'read'],
+      response: { 200: AgentTraceDetailResponse, ...commonErrors },
+      detail: {
+        summary: 'Read an agent trace',
+        description:
+          'Every step of one trace, oldest first: the run, the model calls it made, and the ' +
+          'tools it used, each with what it was given and what it returned.',
+      },
+    },
+  )
+
+  .get(
+    '/teams/:teamId/agent-analytics',
+    async ({ membership, query }) => {
+      const scope = {
+        teamIds: [membership.teamId],
+        projectIds: await projectsWithPermission(membership, 'agent_usage', 'read'),
+      };
+      const [analytics, readableProjects] = await Promise.all([
+        getAgentAnalytics(
+          onlyProjects(scope, queryProjectIds(query.projectIds)),
+          query.days ?? DEFAULT_ANALYTICS_DAYS,
+        ),
+        analyticsProjects(scope),
+      ]);
+      return { ...analytics, readableProjects };
+    },
+    {
+      params: teamParams,
+      query: analyticsQuery,
+      teamPermission: ['agent_usage', 'read'],
+      response: { 200: TeamAgentAnalyticsResponse, ...commonErrors },
+      detail: {
+        summary: 'Read the agent dashboard of a team',
+        description:
+          'Runs, tokens and model cost of the agents of the team, over the last `days` days ' +
+          'beside the same span before it. An owner or a manager of the team reads every ' +
+          'project; anyone else the projects where their role grants agent_usage read. ' +
+          '`projectIds` narrows it to some of them.',
+      },
+    },
+  )
+
+  .get(
+    '/workspaces/:workspaceId/agent-analytics',
+    async ({ standing, query }) =>
+      getAgentAnalytics(
+        await workspaceScope(standing.workspaceId),
+        query.days ?? DEFAULT_ANALYTICS_DAYS,
+      ),
+    {
+      workspaceManager: true,
+      params: workspaceParams,
+      query: workspaceAnalyticsQuery,
+      response: { 200: AgentAnalyticsResponse, ...errors(400, 401, 404) },
+      detail: {
+        summary: 'Read the agent dashboard of a workspace',
+        description:
+          'The agent dashboard over every team of a workspace you manage, with the teams ' +
+          'compared in `teams`.',
+      },
+    },
+  )
+
   .delete(
     '/teams/:teamId/ai-agents/:agentId',
     async ({ params, membership }) => {
       await requireVisibleAgent(params.agentId, membership);
+      await assertFullAgentAccess(membership, params.agentId);
       const ok = await deleteAgent(params.agentId, membership.teamId);
       if (!ok) throw new HttpError(404, 'Agent not found');
       return noContent();
@@ -349,33 +498,47 @@ export const aiAgentRoutes = new Elysia({ name: 'ai-agents', detail: { tags: ['A
       response: { 204: t.Void(), ...commonErrors },
       detail: {
         summary: 'Delete an AI agent',
-        description: 'Delete an AI agent and its bot user. Irreversible.',
+        description: 'Permanently delete an AI agent and its bot user.',
         ...mcpTool('delete_ai_agent'),
       },
     },
   )
 
-  // The agent is built from its stored model configuration (Mastra) and works in the
-  // project of this path, which it has to be a member of.
+  .get('/projects/:projectKey/ai-agents/options', ({ project }) => listProjectAgents(project.id), {
+    projectMember: true,
+    response: { 200: ProjectAgentListResponse, ...accessErrors },
+    detail: {
+      summary: "List a project's agents",
+      description: 'Their id, name, kind and model, for any member of the project.',
+    },
+  })
+
+  // The answer is not waited for: a run can take longer than a proxy holds a quiet
+  // request open, or than an MCP client waits for a tool result.
   .post(
     '/projects/:projectKey/ai-agents/:agentId/run',
-    async ({ params, project, body, user }) =>
-      runAgent(
+    async ({ params, project, body, user, set }) => {
+      const runId = await queueApiRun(
         params.agentId,
         project.id,
         body.prompt,
-        chatRunOpts(user, params.agentId, body.threadId),
-      ),
+        requireUser(user).id,
+      );
+      set.status = 202;
+      return { runId, status: 'queued' as const, retryAfterSeconds: QUEUED_POLL_SECONDS };
+    },
     {
-      body: runBody,
+      body: apiRunBody,
       params: projectAgentParams,
       permission: ['ai_agents', 'read'],
-      response: { 200: RunAgentResponse, ...commonErrors },
+      response: { 202: QueuedApiRunResponse, ...commonErrors },
       detail: {
         summary: 'Run an AI agent',
         description:
-          'Send a prompt to an internal AI agent and return its answer. Only an internal agent ' +
-          'runs here; an external one has no model config and returns 400.',
+          'Queue an agent run with prompt as the task and return the run id at once. The run ' +
+          "appears in the agent's run history. Call get_agent_run after each retryAfterSeconds " +
+          'until status is success, failed or ' +
+          'canceled. An agent with chat turned off returns 403.',
         ...mcpTool('run_ai_agent'),
       },
     },
@@ -415,7 +578,9 @@ export const aiAgentRoutes = new Elysia({ name: 'ai-agents', detail: { tags: ['A
       },
       detail: {
         summary: 'Run an AI agent (stream)',
-        description: "Stream an internal AI agent's response as it is generated.",
+        description:
+          "Stream an internal AI agent's response as it is generated. An agent with chat " +
+          'turned off answers with an `error` event.',
       },
     },
   )

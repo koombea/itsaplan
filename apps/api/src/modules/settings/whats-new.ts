@@ -1,4 +1,5 @@
 import { db, appSetting, userPreference } from '@repo/db';
+import type { Locale } from '@repo/mailer';
 import { eq, sql } from 'drizzle-orm';
 import type { AuthUser } from '#shared/access';
 import { getAppVersion, releasesSince, type Release } from './updates';
@@ -9,8 +10,8 @@ import { getAppVersion, releasesSince, type Release } from './updates';
 //
 // The dump and the data report are administration: they name the projects, roles and
 // agents of the whole instance, so only its owner reads them. Team ownership is not
-// the line to draw here — every account is given a team of its own at registration,
-// which would make that everyone.
+// the line to draw here — nearly every account owns a team of its own, which would make
+// that everyone.
 
 const MIGRATION_REPORT_KEY = 'migration.teams';
 // The migration is matched by name, not by its number: a merge from main renumbers the
@@ -86,10 +87,10 @@ export async function getWhatsNew(user: AuthUser): Promise<WhatsNew> {
 
 // Closes the screen for this user, for the version they saw. A row is written even
 // when they have no preferences yet, so the screen does not come back.
-export async function markWhatsNewSeen(userId: string): Promise<void> {
+export async function markWhatsNewSeen(userId: string, locale: Locale): Promise<void> {
   await db
     .insert(userPreference)
-    .values({ userId, seenVersion: getAppVersion() })
+    .values({ userId, locale, seenVersion: getAppVersion() })
     .onConflictDoUpdate({
       target: userPreference.userId,
       set: { seenVersion: getAppVersion(), updatedAt: sql`now()` },

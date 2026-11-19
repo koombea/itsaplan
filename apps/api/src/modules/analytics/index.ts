@@ -4,12 +4,14 @@ import { requireUser } from '#shared/access';
 import { guards } from '#shared/guards';
 import { mcpTool } from '#mcp/generate';
 import { accessErrors, commonErrors } from '#shared/responses';
+import { instantParam } from '#shared/lib';
 import {
   ActivityPage,
   AgentRunFeedListResponse,
   AgentRunStatsDto,
   AgentWorkloadListResponse,
   BreakdownListResponse,
+  BurnupDto,
   PulseListResponse,
   StatsDto,
   ThroughputListResponse,
@@ -17,6 +19,7 @@ import {
   activityQuery,
   agentRunFeedQuery,
   breakdownQuery,
+  burnupQuery,
   daysQuery,
   pulseQuery,
   throughputQuery,
@@ -26,6 +29,7 @@ import {
   getBreakdown,
   getPulse,
   getThroughput,
+  getBurnup,
   listActivity,
   listAgentRunFeed,
   getAgentRunStats,
@@ -64,7 +68,7 @@ export const analyticsRoutes = new Elysia({
       response: { 200: StatsDto, ...accessErrors },
       detail: {
         summary: 'Get project stats',
-        description: 'Issue counts by state (open, in progress, overdue, and more).',
+        description: 'Get issue counts by state: open, in progress, overdue and more.',
         ...mcpTool('get_project_stats'),
       },
     },
@@ -81,7 +85,7 @@ export const analyticsRoutes = new Elysia({
       response: { 200: BreakdownListResponse, ...commonErrors },
       detail: {
         summary: 'Get project breakdown',
-        description: 'Issue counts grouped by a chosen dimension.',
+        description: 'Get issue counts grouped by one dimension.',
         ...mcpTool('get_project_breakdown'),
       },
     },
@@ -107,7 +111,8 @@ export const analyticsRoutes = new Elysia({
       detail: {
         summary: 'Get project pulse',
         description:
-          'Activity counts over time. Scope me counts only events performed by the authenticated user; project includes all project activity.',
+          "Get activity counts over time. scope 'me' counts only " +
+          "your actions. 'project' counts all project activity.",
         ...mcpTool('get_project_pulse'),
       },
     },
@@ -125,8 +130,35 @@ export const analyticsRoutes = new Elysia({
       response: { 200: ThroughputListResponse, ...commonErrors },
       detail: {
         summary: 'Get project throughput',
-        description: 'Created versus closed issues over time.',
+        description: 'Get created and closed issue counts over time.',
         ...mcpTool('get_project_throughput'),
+      },
+    },
+  )
+
+  .get(
+    '/projects/:projectKey/analytics/burnup',
+    async ({ project, query }) => {
+      const days = query.days != null ? Math.min(Math.max(query.days, 7), 730) : 90;
+      const forecastWeeks =
+        query.forecastWeeks != null ? Math.min(Math.max(query.forecastWeeks, 1), 12) : 4;
+      return getBurnup(project.id, {
+        days,
+        initiativeId: query.initiativeId ?? null,
+        forecastWeeks,
+      });
+    },
+    {
+      query: burnupQuery,
+      permission: ['dashboards', 'read'],
+      response: { 200: BurnupDto, ...commonErrors },
+      detail: {
+        summary: 'Get project burnup',
+        description:
+          'Get scope, started and completed issue counts at the end of each day, with a ' +
+          'completion date forecast from the recent closing rate ' +
+          'and scope growth. initiativeId limits it to one initiative.',
+        ...mcpTool('get_project_burnup'),
       },
     },
   )
@@ -156,6 +188,8 @@ export const analyticsRoutes = new Elysia({
         actorUserId: query.actorUserId ?? null,
         action: query.action ?? null,
         issueIds,
+        from: instantParam('from', query.from),
+        to: instantParam('to', query.to),
       });
     },
     {
@@ -164,7 +198,9 @@ export const analyticsRoutes = new Elysia({
       response: { 200: ActivityPage, ...commonErrors },
       detail: {
         summary: 'Get project activity',
-        description: 'Project-wide feed of issue activity.',
+        description:
+          "Get the project's issue activity feed, newest first: " +
+          'comments and changes such as creation and state moves.',
         ...mcpTool('get_project_activity'),
       },
     },
@@ -182,7 +218,7 @@ export const analyticsRoutes = new Elysia({
       response: { 200: AgentRunFeedListResponse, ...commonErrors },
       detail: {
         summary: 'List agent runs',
-        description: 'Project-wide feed of agent runs.',
+        description: "List the project's agent runs.",
         ...mcpTool('list_agent_runs'),
       },
     },
@@ -200,7 +236,7 @@ export const analyticsRoutes = new Elysia({
       response: { 200: AgentRunStatsDto, ...commonErrors },
       detail: {
         summary: 'Get agent run stats',
-        description: 'Agent run outcome counts (success, failed, pending).',
+        description: 'Count agent runs by outcome: success, failed, pending.',
         ...mcpTool('get_agent_run_stats'),
       },
     },
@@ -218,7 +254,7 @@ export const analyticsRoutes = new Elysia({
       response: { 200: WebhookStatsDto, ...commonErrors },
       detail: {
         summary: 'Get webhook stats',
-        description: 'Webhook delivery outcomes and active/disabled webhook counts.',
+        description: 'Get webhook delivery outcomes and counts of active and disabled webhooks.',
         ...mcpTool('get_webhook_stats'),
       },
     },
@@ -234,7 +270,7 @@ export const analyticsRoutes = new Elysia({
       response: { 200: AgentWorkloadListResponse, ...accessErrors },
       detail: {
         summary: 'Get agent workload',
-        description: 'Per-agent open delegated issues and run outcomes.',
+        description: "Get each agent's open delegated issues and run outcomes.",
         ...mcpTool('get_agent_workload'),
       },
     },

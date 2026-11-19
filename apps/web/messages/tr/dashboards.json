@@ -1,0 +1,247 @@
+{
+  "noAccess": "Panolara erişiminiz yok.",
+  "defaultName": "Genel Bakış",
+  "newDashboard": "Yeni pano",
+  "renameDashboard": "Panoyu yeniden adlandır",
+  "namePlaceholder": "Pano adı",
+  "options": "Pano seçenekleri",
+  "rename": "Yeniden adlandır",
+  "editLayout": "Düzeni düzenle",
+  "discard": "Değişiklikleri at",
+  "saveDashboard": "Panoyu kaydet",
+  "saveChanges": "Değişiklikleri kaydet",
+  "noWidgets": "Henüz bileşen yok. Panoyu oluşturmak için bir bileşen ekleyin.",
+  "addWidget": "Bileşen ekle",
+  "searchWidgets": "Bileşenlerde ara",
+  "clearSearch": "Aramayı temizle",
+  "noWidgetMatches": "“{query}” ile eşleşen bileşen yok. Başka bir kelime deneyin veya aramayı temizleyin.",
+  "noWidgetMatchesInGroup": "Bu grupta “{query}” ile eşleşen bileşen yok. Tüm gruplarda aramak için Tümü'nü seçin.",
+  "addPanel": {
+    "title": "Bileşen ekle",
+    "description": "Bir bileşeni panoya sürükleyin.",
+    "all": "Tümü",
+    "groupFilter": "Bileşen grubu",
+    "added": "{count, plural, =1 {Eklendi} other {# kez eklendi}}",
+    "status": "{count, plural, =0 {Henüz bir şey eklenmedi} other {# bileşen eklendi}}",
+    "undo": "Sonuncuyu kaldır",
+    "new": "Yeni"
+  },
+  "dragToMove": "Taşımak için sürükleyin",
+  "widgetName": "Bileşen adı",
+  "widgetSettings": "Bileşen ayarları",
+  "widgetOptions": "Bileşen seçenekleri",
+  "removeWidget": "Bileşeni kaldır",
+  "lastDays": "Son {days} gün",
+  "showRows": "{count} göster",
+  "widgetGroups": {
+    "issues": "İşler",
+    "agents": "Yapay zekâ ajanları ve webhook'lar"
+  },
+  "widgets": {
+    "stat": {
+      "label": "İş sayısı",
+      "description": "Bir filtreyle eşleşen iş sayısı, örneğin açık hatalar"
+    },
+    "recent_issues": {
+      "label": "Son işler",
+      "description": "Bir filtreyle eşleşen yeni veya son güncellenen işler"
+    },
+    "activity_feed": {
+      "label": "Etkinlik akışı",
+      "description": "İşlerdeki son değişiklikler ve bunları yapanlar"
+    },
+    "pulse": {
+      "label": "Nabız (Pulse)",
+      "description": "Saat, gün veya haftaya göre proje etkinliği ısı haritası"
+    },
+    "throughput": {
+      "label": "İş hacmi (Throughput)",
+      "description": "Her hafta oluşturulan ve kapatılan işler"
+    },
+    "burnup": {
+      "label": "Burnup Grafiği",
+      "description": "Günlük toplam ve tamamlanan işler, tahmini bitiş tarihiyle"
+    },
+    "breakdown": {
+      "label": "Dağılım",
+      "description": "Durum, öncelik, tür, sorumlu veya temsilciye göre işler"
+    },
+    "agent_runs": {
+      "label": "Ajan çalıştırmaları",
+      "description": "Son çalıştırmalar ve durumları, örneğin başarısız veya sırada"
+    },
+    "agent_health": {
+      "label": "Ajan sağlığı",
+      "description": "Seçilen dönemde tüm ajanların başarı oranı ve başarısız çalıştırmaları"
+    },
+    "webhook_health": {
+      "label": "Webhook sağlığı",
+      "description": "Teslim sonuçları ve art arda hatalardan sonra kapatılan uç noktalar"
+    },
+    "agent_workload": {
+      "label": "Ajan iş yükü",
+      "description": "Her ajan için: devredilen açık işler ve başarılı çalıştırmalar"
+    }
+  },
+  "breakdown": {
+    "empty": "Henüz iş yok.",
+    "by": {
+      "status": "Durum",
+      "priority": "Öncelik",
+      "type": "Tür",
+      "assignee": "Sorumlu",
+      "delegate": "Temsilci"
+    },
+    "caption": {
+      "status": "Duruma göre",
+      "priority": "Önceliğe göre",
+      "type": "Türe göre",
+      "assignee": "Sorumluya göre",
+      "delegate": "Temsilciye göre"
+    }
+  },
+  "recentIssues": {
+    "empty": "Bu filtreyle eşleşen iş yok.",
+    "captionCreated": "En yeni oluşturulanlar",
+    "captionUpdated": "Son güncellenenler",
+    "filterCount": "{count, plural, one {# filtre} other {# filtre}}",
+    "sort": {
+      "created": "En yeni",
+      "updated": "Güncellenme"
+    }
+  },
+  "activityFeed": {
+    "empty": "Bu filtreyle eşleşen etkinlik yok.",
+    "someone": "Biri",
+    "filterCount": "{count, plural, one {# filtre} other {# filtre}}",
+    "actions": {
+      "all": "Tüm etkinlikler",
+      "status": "Durum değişiklikleri",
+      "assignee": "Atamalar",
+      "priority": "Öncelik",
+      "created": "Oluşturulanlar"
+    },
+    "verbs": {
+      "comment": "şu işe yorum yaptı:",
+      "created": "oluşturdu:",
+      "title": "başlığını değiştirdi:",
+      "description": "açıklamasını güncelledi:",
+      "status": "durumunu değiştirdi:",
+      "assignee": "sorumlusunu değiştirdi:",
+      "priority": "önceliğini değiştirdi:",
+      "type": "türünü değiştirdi:",
+      "start_date": "başlangıç tarihini değiştirdi:",
+      "due_date": "bitiş tarihini değiştirdi:",
+      "label_add": "etiket ekledi:",
+      "label_remove": "etiketini kaldırdı:",
+      "field": "alanını güncelledi:",
+      "other": "güncelledi:"
+    }
+  },
+  "pulse": {
+    "caption": {
+      "hour": "Saate göre",
+      "day": "Güne göre",
+      "week": "Haftaya göre"
+    },
+    "unit": {
+      "hour": "Saat",
+      "day": "Gün",
+      "week": "Hafta"
+    },
+    "events": "{count, plural, one {# olay} other {# olay}}",
+    "eventNoun": "{count, plural, one {olay} other {olay}}",
+    "active": "{count} aktif",
+    "less": "Daha az",
+    "more": "Daha çok",
+    "scope": {
+      "project": "Tüm proje",
+      "me": "Benim etkinliklerim"
+    }
+  },
+  "throughput": {
+    "empty": "Bu dönemde etkinlik yok.",
+    "lastWeeks": "Son {weeks} hafta",
+    "created": "Oluşturulan",
+    "closed": "Kapatılan"
+  },
+  "burnup": {
+    "empty": "Bu dönemde iş yok.",
+    "scope": "Kapsam",
+    "started": "Başlanan",
+    "completed": "Tamamlanan",
+    "projection": "Tahmin",
+    "band": "Tahmin aralığı",
+    "projected": "Tahmini {date}",
+    "range": "{from} – {to}",
+    "forecastShape": {
+      "line": "Tahmin çizgisi",
+      "range": "Tahmin aralığı"
+    },
+    "noForecast": "Son {weeks, plural, one {# haftada} other {# haftada}} ilerleme kaydedilmedi",
+    "allDone": "Tümü tamamlandı",
+    "velocity": "{rate} / gün",
+    "growth": "+{rate} / gün yeni",
+    "target": "Hedef {date}",
+    "targetLabel": "Hedef",
+    "today": "Bugün",
+    "wholeProject": "Tüm proje",
+    "forecastWeeks": "{weeks, plural, one {# haftalık} other {# haftalık}} hız oranı"
+  },
+  "agentRuns": {
+    "empty": "Henüz ajan çalıştırması yok.",
+    "filters": {
+      "all": "Tüm çalıştırmalar",
+      "failed": "Başarısız",
+      "pending": "Sırada",
+      "success": "Başarılı"
+    },
+    "status": {
+      "pending": "sırada",
+      "success": "başarılı",
+      "failed": "başarısız",
+      "canceled": "iptal edildi"
+    },
+    "trigger": {
+      "mention": "bahsedilme üzerine çalıştı:",
+      "delegation": "iş devredilmesi üzerine çalıştı:",
+      "field": "alan değişikliği üzerine çalıştı:",
+      "manual": "manuel çalıştırıldı",
+      "api": "API ile çalıştırıldı",
+      "schedule": "zamanlamaya göre çalıştı",
+      "status": "durum değişikliği üzerine çalıştı:",
+      "event": "olay üzerine çalıştı:"
+    }
+  },
+  "agentHealth": {
+    "empty": "Ajan çalıştırması yok.",
+    "successRate": "başarı oranı",
+    "runs": "{count, plural, one {# çalıştırma} other {# çalıştırma}}",
+    "failed": "{count} başarısız",
+    "queued": "{count} sırada"
+  },
+  "webhookHealth": {
+    "deliveries": "teslimat",
+    "failed": "{count} başarısız",
+    "pending": "{count} beklemede",
+    "allDelivered": "tümü teslim edildi",
+    "disabled": "{count, plural, one {# devre dışı uç nokta} other {# devre dışı uç nokta}}"
+  },
+  "agentWorkload": {
+    "empty": "Bu projede ajan bulunmuyor.",
+    "agent": "Ajan",
+    "delegated": "Devredilen",
+    "runs": "Çalıştırmalar",
+    "failed": "{count} başarısız",
+    "kind": {
+      "external": "Harici",
+      "internal": "Dahili"
+    }
+  },
+  "defaultWidgets": {
+    "open": "Açık",
+    "inProgress": "Devam ediyor",
+    "backlog": "İş Havuzu",
+    "unassigned": "Atanmamış"
+  }
+}
