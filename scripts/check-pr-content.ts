@@ -2,7 +2,8 @@
 /**
  * PR content gate: rejects AI assistant attribution, matched by
  * AI_ATTRIBUTION_PATTERNS below. Scans the PR title, the PR body, every commit
- * message in the range, and every line added by the diff.
+ * message in the range that is not already in upstream, and every line added by
+ * the diff.
  */
 
 type Violation = {
@@ -11,9 +12,9 @@ type Violation = {
   text: string;
 };
 
-const [, , baseArg, headArg] = process.argv;
+const [, , baseArg, headArg, upstreamArg] = process.argv;
 if (!baseArg || !headArg) {
-  console.error('Usage: bun run scripts/check-pr-content.ts <baseSha> <headSha>');
+  console.error('Usage: bun run scripts/check-pr-content.ts <baseSha> <headSha> [upstreamRef]');
   process.exit(1);
 }
 
@@ -75,7 +76,11 @@ if (process.env.PR_BODY) {
   scanBlock('PR body', process.env.PR_BODY);
 }
 
-const hashes = git('log', '--format=%H', `${baseArg}..${headArg}`).split('\n').filter(Boolean);
+// Commits already in upstream arrive through a sync and belong to its authors.
+const upstreamExclude = upstreamArg ? ['--not', upstreamArg] : [];
+const hashes = git('log', '--format=%H', `${baseArg}..${headArg}`, ...upstreamExclude)
+  .split('\n')
+  .filter(Boolean);
 for (const hash of hashes) {
   const message = git('log', '-1', '--format=%B', hash);
   scanBlock(`commit ${hash.slice(0, 7)}`, message);
