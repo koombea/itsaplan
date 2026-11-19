@@ -1,7 +1,10 @@
 name: PR content gate
 
+# pull_request_target takes this workflow and the script from the base branch, so a pull
+# request cannot change the gate that judges it. The pull request is only read as git data;
+# none of its code is run.
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, edited, synchronize, reopened]
 
 permissions:
@@ -15,26 +18,19 @@ jobs:
     name: Check for AI attribution
     runs-on: ubuntu-latest
     steps:
-      # Check out the base ref so the gate runs its own copy of the script,
-      # not the one a pull request could have weakened.
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 0
+          persist-credentials: false
 
+      # The pull request ref also holds heads that live in a fork.
       - name: Fetch the pull request head
-        run: git fetch --no-tags origin ${{ github.event.pull_request.head.sha }}
+        run: git fetch --no-tags origin "+refs/pull/${{ github.event.pull_request.number }}/head:refs/remotes/pr/head"
 
       # Commits a sync brings in from upstream are not checked.
       - name: Fetch upstream
         run: git fetch --no-tags https://github.com/croffasia/itsaplan.git +refs/heads/main:refs/remotes/upstream/main
-
-      # The pull request that adds the gate has no copy on its base yet.
-      - name: Take the pull request's copy when the base has none
-        run: |
-          if [ ! -f scripts/check-pr-content.ts ]; then
-            git show "${{ github.event.pull_request.head.sha }}:scripts/check-pr-content.ts" > scripts/check-pr-content.ts
-          fi
 
       - uses: oven-sh/setup-bun@v2
         with:

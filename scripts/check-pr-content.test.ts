@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -59,6 +59,31 @@ test('passes attributed commits that are already in upstream', () => {
   const base = commit('base.txt', 'chore: base');
   const upstream = mergeAttributedBranch('upstream');
   expect(gate(base, git('rev-parse', 'HEAD'), upstream)).toBe(0);
+});
+
+// Adds `scripts/check-pr-content.ts` with the given pattern lines and returns the base and head.
+function changeGatePatterns(...lines: string[]): [string, string] {
+  const base = commit('base.txt', 'chore: base');
+  mkdirSync(join(repo, 'scripts'), { recursive: true });
+  const file = ['const AI_ATTRIBUTION_PATTERNS: RegExp[] = [', ...lines, '];', ''].join('\n');
+  writeFileSync(join(repo, 'scripts/check-pr-content.ts'), file);
+  git('add', '.');
+  git('commit', '-q', '-m', 'ci: change the gate patterns');
+  return [base, git('rev-parse', 'HEAD')];
+}
+
+const MARKER = `co-${'authored'}-by:[^\\n]*\\b${'cla' + 'ude'}\\b`;
+
+test('passes the gate spelling a marker out in one of its own pattern literals', () => {
+  expect(gate(...changeGatePatterns(`  /${MARKER}/i,`))).toBe(0);
+});
+
+test('rejects attribution in a comment among the gate patterns', () => {
+  expect(gate(...changeGatePatterns('  /x/,', `  // ${TRAILER}`))).toBe(1);
+});
+
+test('rejects a regex literal followed by a comment carrying attribution', () => {
+  expect(gate(...changeGatePatterns(`  /x/, // ${TRAILER} /i,`))).toBe(1);
 });
 
 test('rejects an attributed commit merged in from a branch that is not upstream', () => {

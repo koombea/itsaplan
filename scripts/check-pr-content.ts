@@ -32,7 +32,7 @@ const AI_ATTRIBUTION_PATTERNS: RegExp[] = [
   /co-authored-by:[^\n]*\b(claude|anthropic|copilot|cursor|chatgpt|gpt-4|gpt-3(?:\.5)?|openai|codex|gemini)\b/i,
   // Assistant tool URLs.
   /claude\.(?:ai\/code|com\/claude-code)/i,
-  // "Generated with Claude Code" / "Generado con Código Claude", with or without the robot emoji.
+  // The tool's generation footer, in English or Spanish, with or without the robot emoji.
   /(?:🤖\s*)?(generated with|generado con)\s+(claude code|c[oó]digo claude)/i,
   // Generic catch: an AI-generation or co-authorship word near an assistant name.
   /(generated|generado|co-authored)[\s\S]{0,40}(claude|copilot|cursor|chatgpt|gpt-4)/i,
@@ -42,21 +42,10 @@ function hasAIAttribution(line: string): boolean {
   return AI_ATTRIBUTION_PATTERNS.some((pattern) => pattern.test(line));
 }
 
-// This file spells the markers out inside AI_ATTRIBUTION_PATTERNS, so only the
-// lines of that array literal are exempt from its own scan — every other added
-// line in this file, including one impersonating an exemption, is still scanned.
+// This file spells the markers out in its pattern literals, so a line of it that is a
+// lone regex literal is not scanned. A comment or a string in it still is.
 const SELF = 'scripts/check-pr-content.ts';
-
-function selfPatternRange(): { start: number; end: number } | undefined {
-  // A pull request branched before the gate landed has no copy of this file.
-  const result = Bun.spawnSync(['git', 'show', `${headArg}:${SELF}`]);
-  if (result.exitCode !== 0) return undefined;
-  const lines = new TextDecoder().decode(result.stdout).split('\n');
-  const start = lines.findIndex((line) => line.includes('AI_ATTRIBUTION_PATTERNS'));
-  if (start === -1) return undefined;
-  const end = lines.findIndex((line, index) => index > start && line.trim() === '];');
-  return end === -1 ? undefined : { start: start + 1, end: end + 1 };
-}
+const REGEX_LITERAL_LINE = /^\s*\/(?![/*])(?:\\.|[^\\/])+\/[dgimsuyv]*,?\s*$/;
 
 const violations: Violation[] = [];
 
@@ -86,7 +75,6 @@ for (const hash of hashes) {
   scanBlock(`commit ${hash.slice(0, 7)}`, message);
 }
 
-const selfRange = selfPatternRange();
 const diff = git('diff', '--unified=0', `${baseArg}...${headArg}`);
 let currentPath: string | undefined;
 let newLineNo = 0;
@@ -112,11 +100,7 @@ for (const line of diff.split('\n')) {
   }
   if (inHunk && line.startsWith('+')) {
     const content = line.slice(1);
-    const exempt =
-      currentPath === SELF &&
-      selfRange !== undefined &&
-      newLineNo >= selfRange.start &&
-      newLineNo <= selfRange.end;
+    const exempt = currentPath === SELF && REGEX_LITERAL_LINE.test(content);
     if (currentPath && !exempt && hasAIAttribution(content)) {
       violations.push({ path: currentPath, line: newLineNo, text: content.trim() });
     }
